@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'data/product_catalog.dart';
+import 'models/product.dart';
 import 'services/voice_bill_decoder.dart';
 
 void main() => runApp(const RetailMindApp());
@@ -215,7 +216,7 @@ class BillLine {
   final Product product;
   int quantity;
 
-  int get total => quantity * product.unitPrice;
+  double get total => quantity * product.price;
 }
 
 class DraftBillScreen extends StatefulWidget {
@@ -243,7 +244,7 @@ class _DraftBillScreenState extends State<DraftBillScreen> {
     _items = widget.draft.items.map(BillLine.fromDecoded).toList();
   }
 
-  int get _total => _items.fold(0, (sum, item) => sum + item.total);
+  double get _total => _items.fold(0, (sum, item) => sum + item.total);
 
   Future<void> _addMissedItem() async {
     final existingIds = _items.map((item) => item.product.id).toSet();
@@ -263,7 +264,7 @@ class _DraftBillScreenState extends State<DraftBillScreen> {
             for (final item in availableProducts)
               ListTile(
                 title: Text(item.name),
-                subtitle: Text('${item.malayalamName} · ₹${item.unitPrice}'),
+                subtitle: Text('${item.malayalamName} · ₹${item.price}'),
                 onTap: () => Navigator.of(context).pop(item),
               ),
           ],
@@ -301,7 +302,7 @@ class _DraftBillScreenState extends State<DraftBillScreen> {
                     onRemove: () => setState(() => _items.removeAt(index)),
                     onQuantityChanged: (change) => setState(() {
                       _items[index].quantity =
-                          (_items[index].quantity + change).clamp(1, 99) as int;
+                          (_items[index].quantity + change).clamp(1, 99);
                     }),
                   ),
                 ),
@@ -366,7 +367,7 @@ class _BillLineTile extends StatelessWidget {
     return ListTile(
       contentPadding: EdgeInsets.zero,
       title: Text(item.product.name),
-      subtitle: Text('₹${item.product.unitPrice} each'),
+      subtitle: Text('₹${item.product.price} each'),
       trailing: isEditing
           ? Row(
               mainAxisSize: MainAxisSize.min,
@@ -377,7 +378,7 @@ class _BillLineTile extends StatelessWidget {
                 IconButton(onPressed: onRemove, icon: const Icon(Icons.delete_outline)),
               ],
             )
-          : Text('${item.quantity} × ₹${item.product.unitPrice} = ₹${item.total}'),
+          : Text('${item.quantity} × ₹${item.product.price} = ₹${item.total}'),
     );
   }
 }

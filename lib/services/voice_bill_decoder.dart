@@ -1,4 +1,4 @@
-import '../data/product_catalog.dart';
+import '../models/product.dart';
 
 class DecodedBillItem {
   const DecodedBillItem({

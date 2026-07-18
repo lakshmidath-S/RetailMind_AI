@@ -73,15 +73,13 @@ flowchart LR
 
 ## Current implementation
 
-The Flutter app currently includes the voice-first billing journey using a local product catalogue and a simulated transcription result:
+The Flutter app is currently transitioning to a fully offline, AI-driven billing architecture. Recent updates include:
 
-1. Home screen with one **New Bill** action.
-2. Minimal recording screen with a start/stop voice toggle.
-3. Processing screen after recording stops.
-4. Draft bill generated from structured product-and-quantity results.
-5. Optional correction mode to remove items, adjust quantities, or add a missed catalogue item.
+1. **Local Database:** Implemented a robust SQLite database (`sqflite`) with core models for Products (including aliases and embeddings), Bills, and Bill Items.
+2. **Voice Billing UI:** A minimal recording screen with a start/stop voice toggle, transitioning to a processing screen.
+3. **Draft Bill Review:** Generated from structured product-and-quantity results, allowing optional correction (remove items, adjust quantities, add missed catalogue items).
 
-Audio capture, OpenAI Whisper transcription, a persistent product database, payment, and inventory updates are the next integration stages.
+On-device audio capture (`whisper.cpp`), the semantic product matching engine, and the analytics dashboard are currently in development.
 
 ## Security
 

@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/material.dart';
 import 'package:retailmind_ai/main.dart';
 
 import 'package:retailmind_ai/data/product_catalog.dart';
@@ -24,6 +25,7 @@ void main() {
 
     await tester.tap(find.byKey(const Key('voiceToggleButton')));
     await tester.pump();
+    await tester.pump(const Duration(milliseconds: 500));
     expect(find.text('Generating your bill...'), findsOneWidget);
     await tester.pump(const Duration(seconds: 2));
     await tester.pumpAndSettle();
@@ -34,7 +36,7 @@ void main() {
   });
 
   testWidgets('correction controls appear only after choosing to correct', (tester) async {
-    await tester.pumpWidget(DraftBillScreen());
+    await tester.pumpWidget(MaterialApp(home: DraftBillScreen()));
 
     expect(find.byKey(const Key('addItemButton')), findsNothing);
     await tester.tap(find.byKey(const Key('editBillButton')));
