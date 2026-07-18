@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+import 'data/product_catalog.dart';
+import 'services/voice_bill_decoder.dart';
+
 void main() => runApp(const RetailMindApp());
 
 class RetailMindApp extends StatelessWidget {
@@ -82,7 +85,11 @@ class _NewBillScreenState extends State<NewBillScreen> {
 
     setState(() => _isListening = false);
     await Navigator.of(context).push<void>(
-      MaterialPageRoute<void>(builder: (_) => const ProcessingBillScreen()),
+      MaterialPageRoute<void>(
+        builder: (_) => const ProcessingBillScreen(
+          transcript: VoiceBillDecoder.demoTranscript,
+        ),
+      ),
     );
   }
 
@@ -153,7 +160,9 @@ class _NewBillScreenState extends State<NewBillScreen> {
 }
 
 class ProcessingBillScreen extends StatefulWidget {
-  const ProcessingBillScreen({super.key});
+  const ProcessingBillScreen({required this.transcript, super.key});
+
+  final String transcript;
 
   @override
   State<ProcessingBillScreen> createState() => _ProcessingBillScreenState();
@@ -169,8 +178,9 @@ class _ProcessingBillScreenState extends State<ProcessingBillScreen> {
   Future<void> _openDraftBill() async {
     await Future<void>.delayed(const Duration(seconds: 2));
     if (!mounted) return;
+    final draft = VoiceBillDecoder.decode(widget.transcript, productCatalog);
     Navigator.of(context).pushReplacement(
-      MaterialPageRoute<void>(builder: (_) => const DraftBillScreen()),
+      MaterialPageRoute<void>(builder: (_) => DraftBillScreen(draft: draft)),
     );
   }
 
@@ -196,34 +206,73 @@ class _ProcessingBillScreenState extends State<ProcessingBillScreen> {
 }
 
 class BillLine {
-  BillLine({required this.name, required this.quantity, required this.unitPrice});
+  BillLine({required this.product, required this.quantity});
 
-  final String name;
+  factory BillLine.fromDecoded(DecodedBillItem item) {
+    return BillLine(product: item.product, quantity: item.quantity);
+  }
+
+  final Product product;
   int quantity;
-  final int unitPrice;
 
-  int get total => quantity * unitPrice;
+  int get total => quantity * product.unitPrice;
 }
 
 class DraftBillScreen extends StatefulWidget {
-  const DraftBillScreen({super.key});
+  DraftBillScreen({DecodedBill? draft, super.key})
+    : draft =
+          draft ??
+              VoiceBillDecoder.decode(
+                VoiceBillDecoder.demoTranscript,
+                productCatalog,
+              );
+
+  final DecodedBill draft;
 
   @override
   State<DraftBillScreen> createState() => _DraftBillScreenState();
 }
 
 class _DraftBillScreenState extends State<DraftBillScreen> {
-  final List<BillLine> _items = [
-    BillLine(name: 'Milk', quantity: 2, unitPrice: 30),
-    BillLine(name: 'Bread', quantity: 1, unitPrice: 40),
-    BillLine(name: 'Parle-G', quantity: 3, unitPrice: 10),
-  ];
+  late final List<BillLine> _items;
   bool _isEditing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _items = widget.draft.items.map(BillLine.fromDecoded).toList();
+  }
 
   int get _total => _items.fold(0, (sum, item) => sum + item.total);
 
-  void _addSampleItem() {
-    setState(() => _items.add(BillLine(name: 'Soap', quantity: 1, unitPrice: 35)));
+  Future<void> _addMissedItem() async {
+    final existingIds = _items.map((item) => item.product.id).toSet();
+    final availableProducts = productCatalog
+        .where((product) => !existingIds.contains(product.id))
+        .toList();
+    if (availableProducts.isEmpty) return;
+
+    final product = await showModalBottomSheet<Product>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            const ListTile(title: Text('Add missed item')),
+            for (final item in availableProducts)
+              ListTile(
+                title: Text(item.name),
+                subtitle: Text('${item.malayalamName} · ₹${item.unitPrice}'),
+                onTap: () => Navigator.of(context).pop(item),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (product != null && mounted) {
+      setState(() => _items.add(BillLine(product: product, quantity: 1)));
+    }
   }
 
   @override
@@ -238,6 +287,8 @@ class _DraftBillScreenState extends State<DraftBillScreen> {
             children: [
               Text('Your bill is ready', style: Theme.of(context).textTheme.headlineSmall),
               const SizedBox(height: 8),
+              Text('Heard: "${widget.draft.transcript}"'),
+              const SizedBox(height: 4),
               const Text('Please check the items before you proceed.'),
               const SizedBox(height: 20),
               Expanded(
@@ -258,7 +309,7 @@ class _DraftBillScreenState extends State<DraftBillScreen> {
               if (_isEditing)
                 OutlinedButton.icon(
                   key: const Key('addItemButton'),
-                  onPressed: _addSampleItem,
+                  onPressed: _addMissedItem,
                   icon: const Icon(Icons.add),
                   label: const Text('Add missed item'),
                 ),
@@ -314,8 +365,8 @@ class _BillLineTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return ListTile(
       contentPadding: EdgeInsets.zero,
-      title: Text(item.name),
-      subtitle: Text('₹${item.unitPrice} each'),
+      title: Text(item.product.name),
+      subtitle: Text('₹${item.product.unitPrice} each'),
       trailing: isEditing
           ? Row(
               mainAxisSize: MainAxisSize.min,
@@ -326,7 +377,7 @@ class _BillLineTile extends StatelessWidget {
                 IconButton(onPressed: onRemove, icon: const Icon(Icons.delete_outline)),
               ],
             )
-          : Text('${item.quantity} × ₹${item.unitPrice} = ₹${item.total}'),
+          : Text('${item.quantity} × ₹${item.product.unitPrice} = ₹${item.total}'),
     );
   }
 }

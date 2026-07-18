@@ -6,7 +6,7 @@ The first release is designed for Malayalam- and English-speaking retailers, wit
 
 ## Key features
 
-- **Fast billing:** Add products, adjust quantities, and complete a bill from a mobile device.
+- **Fast billing:** Create a bill by speaking several products and quantities at once.
 - **Voice-assisted billing:** Speak short Malayalam or English commands to add, remove, search for, or change the quantity of products in the active bill.
 - **Multilingual experience:** Malayalam and English interface and product-name support.
 - **Inventory management:** Automatically reduce stock after a completed sale and surface low-stock alerts.
@@ -15,7 +15,7 @@ The first release is designed for Malayalam- and English-speaking retailers, wit
 
 ## Voice billing
 
-Voice input is available only on the **New Bill** screen. This keeps the most frequent retail task fast while retaining touch-based confirmation for sensitive actions such as payment, discounts, refunds, and final checkout.
+Voice input is available only on the **New Bill** screen. Before recording, the shopkeeper sees only one meaningful action: start recording. All correction controls appear only after a draft bill has been generated.
 
 Example commands:
 
@@ -29,9 +29,10 @@ Example commands:
 1. The shopkeeper opens a new bill and taps the microphone.
 2. They speak a short product command in Malayalam or English.
 3. OpenAI Whisper converts speech to text.
-4. RetailMind matches the text against the store's product catalogue and aliases.
-5. The proposed cart update is shown for confirmation.
-6. The cart and total update after confirmation; payment and receipt sharing remain touch-based.
+4. RetailMind separates the spoken items, matches them against the store's product catalogue and aliases, and fetches their stored prices.
+5. The proposed bill is shown for confirmation.
+6. If an item is incorrect, the shopkeeper enters correction mode and changes only that item.
+7. The cart and total update after confirmation; payment and receipt sharing remain touch-based.
 
 For better recognition, products should support Malayalam names, English names, and local spoken aliases. For example, `പാൽ`, `milk`, and `paal` can identify the same product.
 
@@ -64,8 +65,24 @@ flowchart LR
 ## MVP scope
 
 1. Malayalam and English UI support.
-2. Product catalogue with multilingual names and aliases.
-3. Mobile billing with manual, search, and barcode entry.
-4. Push-to-talk voice commands on the billing screen.
+2. Product catalogue with multilingual names, aliases, and database-owned prices.
+3. Push-to-talk voice billing on the New Bill screen.
+4. Processing and editable draft-bill confirmation screens.
 5. Touch confirmation before applying voice-driven cart changes.
 6. Inventory deduction, low-stock alerts, receipts, and basic sales reports.
+
+## Current implementation
+
+The Flutter app currently includes the voice-first billing journey using a local product catalogue and a simulated transcription result:
+
+1. Home screen with one **New Bill** action.
+2. Minimal recording screen with a start/stop voice toggle.
+3. Processing screen after recording stops.
+4. Draft bill generated from structured product-and-quantity results.
+5. Optional correction mode to remove items, adjust quantities, or add a missed catalogue item.
+
+Audio capture, OpenAI Whisper transcription, a persistent product database, payment, and inventory updates are the next integration stages.
+
+## Codex contribution
+
+This project is being developed with assistance from OpenAI Codex. Codex has helped translate the product workflow into the Flutter foundation, create the initial voice-billing screens and tests, and maintain this README as the implementation evolves. Product requirements, business decisions, and final review remain with the project owner.
