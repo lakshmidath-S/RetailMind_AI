@@ -83,6 +83,10 @@ The Flutter app currently includes the voice-first billing journey using a local
 
 Audio capture, OpenAI Whisper transcription, a persistent product database, payment, and inventory updates are the next integration stages.
 
+## Security
+
+The app blocks cleartext network traffic on Android and keeps iOS App Transport Security enabled. API keys and other secrets are excluded from Git and must never be shipped in the mobile app. Future voice transcription will go through a RetailMind backend, which securely holds the OpenAI key and returns only a validated draft bill to the device. See [the security baseline](docs/security.md) for the required controls and future protocol.
+
 ## Codex contribution
 
 This project is being developed with assistance from OpenAI Codex. Codex has helped translate the product workflow into the Flutter foundation, create the initial voice-billing screens and tests, and maintain this README as the implementation evolves. Product requirements, business decisions, and final review remain with the project owner.
