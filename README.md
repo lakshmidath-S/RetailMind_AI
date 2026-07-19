@@ -76,10 +76,13 @@ flowchart LR
 The Flutter app is currently transitioning to a fully offline, AI-driven billing architecture. Recent updates include:
 
 1. **Local Database:** Implemented a robust SQLite database (`sqflite`) with core models for Products (including aliases and embeddings), Bills, and Bill Items.
-2. **Voice Billing UI:** A minimal recording screen with a start/stop voice toggle, transitioning to a processing screen.
-3. **Draft Bill Review:** Generated from structured product-and-quantity results, allowing optional correction (remove items, adjust quantities, add missed catalogue items).
+2. **Voice Billing UI:** A minimal recording screen with a start/stop voice toggle, with explicit language selection (English / Malayalam).
+3. **Offline On-Device AI:** Integrated `whisper.cpp` via the `whisper_ggml` plugin. The app now natively runs a fine-tuned Malayalam Whisper Medium model (Q4_0, ~424MB) purely offline on the device for transcribing Malayalam voice bills.
+4. **Draft Bill Review:** Generated from structured product-and-quantity results, allowing optional correction (remove items, adjust quantities, add missed catalogue items).
 
-On-device audio capture (`whisper.cpp`), the semantic product matching engine, and the analytics dashboard are currently in development.
+## Future Enhancements
+
+- **Live Transcription (Streaming):** Transition the `whisper.cpp` architecture from "record-then-process" to `transcribeLive`. By processing the audio stream chunk-by-chunk while the user is actively speaking, perceived latency will drop to near-zero, making the voice billing feel instantaneous.
 
 ## Security
 
