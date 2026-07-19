@@ -49,6 +49,8 @@ class VoiceBillDecoder {
       model: model,
       audioPath: audioPath,
       lang: language.code,
+      noContext: true, // Speeds up single-utterance decoding
+      suppressNonSpeechTokens: true, // Prevents wasting time on background noise
     );
 
     final transcript = result?.transcription.text.trim();
