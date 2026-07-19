@@ -53,3 +53,6 @@ app.*.map.json
 *.p12
 *.p8
 secrets/
+
+# Ignore AI models
+assets/models/*.bin

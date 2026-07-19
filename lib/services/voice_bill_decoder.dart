@@ -1,5 +1,6 @@
 import 'package:whisper_ggml/whisper_ggml.dart';
 import '../models/product.dart';
+import 'whisper_model_service.dart';
 import 'transcript_normalizer.dart';
 import 'quantity_parser.dart';
 import 'matching_engine.dart';
@@ -36,12 +37,18 @@ class VoiceBillDecoder {
 
 
   /// Full pipeline: audio → Whisper transcription → normalizer → parser → matcher.
-  static Future<DecodedBill> decode(String audioPath, List<Product> products) async {
+  static Future<DecodedBill> decode(String audioPath, List<Product> products, {VoiceLanguage language = VoiceLanguage.english}) async {
     final controller = WhisperController();
+    
+    // Choose model based on language
+    final model = language == VoiceLanguage.malayalam 
+        ? WhisperModel.small 
+        : WhisperModel.base;
+
     final result = await controller.transcribe(
-      model: WhisperModel.tiny,
+      model: model,
       audioPath: audioPath,
-      lang: 'auto',
+      lang: language.code,
     );
 
     final transcript = result?.transcription.text.trim();

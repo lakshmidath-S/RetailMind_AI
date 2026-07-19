@@ -386,6 +386,7 @@ class NewBillScreen extends StatefulWidget {
 
 class _NewBillScreenState extends State<NewBillScreen> {
   bool _isListening = false;
+  VoiceLanguage _selectedLanguage = VoiceLanguage.english;
   final AudioRecordingService _audioService = AudioRecordingService();
 
   @override
@@ -398,7 +399,7 @@ class _NewBillScreenState extends State<NewBillScreen> {
     if (!_isListening) {
       final hasPermission = await _audioService.hasPermission();
       if (hasPermission) {
-        await WhisperModelService.getModelPath(); // Warm up model
+        await WhisperModelService.getModelPath(_selectedLanguage); // Warm up model
         await _audioService.startRecording();
         setState(() => _isListening = true);
       }
@@ -414,6 +415,7 @@ class _NewBillScreenState extends State<NewBillScreen> {
         MaterialPageRoute<void>(
           builder: (_) => ProcessingBillScreen(
             audioPath: path,
+            language: _selectedLanguage,
           ),
         ),
       );
@@ -437,6 +439,19 @@ class _NewBillScreenState extends State<NewBillScreen> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               const Spacer(),
+              SegmentedButton<VoiceLanguage>(
+                segments: const [
+                  ButtonSegment(value: VoiceLanguage.english, label: Text('English')),
+                  ButtonSegment(value: VoiceLanguage.malayalam, label: Text('മലയാളം')),
+                ],
+                selected: {_selectedLanguage},
+                onSelectionChanged: (Set<VoiceLanguage> newSelection) {
+                  setState(() {
+                    _selectedLanguage = newSelection.first;
+                  });
+                },
+              ),
+              const SizedBox(height: 24),
               Icon(
                 _isListening ? Icons.graphic_eq : Icons.mic_none_rounded,
                 size: 88,
@@ -487,9 +502,10 @@ class _NewBillScreenState extends State<NewBillScreen> {
 }
 
 class ProcessingBillScreen extends StatefulWidget {
-  const ProcessingBillScreen({required this.audioPath, super.key});
+  const ProcessingBillScreen({required this.audioPath, required this.language, super.key});
 
   final String audioPath;
+  final VoiceLanguage language;
 
   @override
   State<ProcessingBillScreen> createState() => _ProcessingBillScreenState();
@@ -507,7 +523,7 @@ class _ProcessingBillScreenState extends State<ProcessingBillScreen> {
     try {
       // Load products from DB instead of hardcoded catalog
       final dbProducts = await DatabaseHelper.instance.getAllProducts();
-      final draft = await VoiceBillDecoder.decode(widget.audioPath, dbProducts);
+      final draft = await VoiceBillDecoder.decode(widget.audioPath, dbProducts, language: widget.language);
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
         MaterialPageRoute<void>(builder: (_) => DraftBillScreen(draft: draft)),
