@@ -44,11 +44,43 @@ class TranscriptNormalizer {
 
   /// Split a normalized transcript into individual item segments.
   static List<String> splitSegments(String normalizedText) {
-    return normalizedText
+    // First, split by explicit separators (commas)
+    final initialParts = normalizedText
         .split(',')
         .map((s) => s.trim())
         .where((s) => s.isNotEmpty)
         .toList();
+
+    final result = <String>[];
+
+    for (var part in initialParts) {
+      // Auto-insert commas for continuous speech (e.g., "2 milk 1 bread")
+      final startsWithDigit = RegExp(r'^\d').hasMatch(part);
+
+      if (startsWithDigit) {
+        // Pattern: Qty Product Qty Product (e.g., "2 milk 1 bread")
+        // Split between Product (Letter) and Qty (Digit)
+        part = part.replaceAllMapped(
+            RegExp(r'(\p{L})\s+(\d+(?:\.\d+)?)', unicode: true), (m) {
+          return '${m.group(1)}, ${m.group(2)}';
+        });
+      } else {
+        // Pattern: Product Qty Product Qty (e.g., "milk 2 bread 1")
+        // Split between Qty (Digit) and Product (Letter)
+        part = part.replaceAllMapped(
+            RegExp(r'(\d+(?:\.\d+)?)\s+(\p{L})', unicode: true), (m) {
+          return '${m.group(1)}, ${m.group(2)}';
+        });
+      }
+
+      // Add the auto-split parts
+      result.addAll(part
+          .split(',')
+          .map((s) => s.trim())
+          .where((s) => s.isNotEmpty));
+    }
+
+    return result;
   }
 
   static String _removeHallucinations(String text) {

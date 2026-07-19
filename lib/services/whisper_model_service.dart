@@ -4,15 +4,16 @@ import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 
 class WhisperModelService {
-  static const String modelName = 'ggml-tiny.en.bin';
-  static const String assetPath = 'assets/models/$modelName';
+  static const String assetPath = 'assets/models/ggml-tiny.en.bin';
+  static const String targetName = 'ggml-tiny.bin'; // whisper_ggml expects this exact name
 
   static Future<String> getModelPath() async {
-    final docDir = await getApplicationDocumentsDirectory();
-    final modelFile = File(p.join(docDir.path, modelName));
+    // whisper_ggml looks in getApplicationSupportDirectory on Android
+    final supportDir = await getApplicationSupportDirectory();
+    final modelFile = File(p.join(supportDir.path, targetName));
 
     if (!await modelFile.exists()) {
-      print('Model not found locally. Copying from assets...');
+      print('Model not found locally. Copying from assets to ${modelFile.path}...');
       try {
         final byteData = await rootBundle.load(assetPath);
         final buffer = byteData.buffer;
