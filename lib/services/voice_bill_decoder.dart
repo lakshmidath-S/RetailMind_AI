@@ -33,7 +33,7 @@ class DecodedBill {
 }
 
 class VoiceBillDecoder {
-  static const demoTranscript = 'two milk, one bread, three parle-g';
+
 
   /// Full pipeline: audio → Whisper transcription → normalizer → parser → matcher.
   static Future<DecodedBill> decode(String audioPath, List<Product> products) async {
@@ -44,7 +44,20 @@ class VoiceBillDecoder {
       lang: 'en',
     );
 
-    final transcript = result?.transcription.text ?? demoTranscript;
+    final transcript = result?.transcription.text.trim();
+    
+    if (transcript == null) {
+      throw Exception('Transcription failed. Ensure the audio is valid and model is loaded.');
+    }
+    
+    if (transcript.isEmpty) {
+      return DecodedBill(
+        transcript: '',
+        items: [],
+        unmatchedSegments: ['No speech detected.'],
+      );
+    }
+    
     return decodeTranscript(transcript, products);
   }
 

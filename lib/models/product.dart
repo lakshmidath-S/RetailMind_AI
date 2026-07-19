@@ -33,8 +33,7 @@ class Product {
   });
 
   Map<String, dynamic> toMap() {
-    return {
-      'id': id,
+    final map = <String, dynamic>{
       'name': name,
       'malayalamName': malayalamName,
       'category': category,
@@ -48,6 +47,8 @@ class Product {
       'embedding_vector': embeddingVector,
       'aliases': jsonEncode(aliases),
     };
+    if (id != null) map['id'] = id;
+    return map;
   }
 
   factory Product.fromMap(Map<String, dynamic> map) {
@@ -67,4 +68,37 @@ class Product {
       aliases: (jsonDecode(map['aliases'] as String) as List<dynamic>).cast<String>(),
     );
   }
+
+  Product copyWith({
+    int? id,
+    String? name,
+    String? malayalamName,
+    String? category,
+    String? brand,
+    double? price,
+    double? gstPercentage,
+    String? unit,
+    int? stockQuantity,
+    String? barcode,
+    String? imagePath,
+    Uint8List? embeddingVector,
+    List<String>? aliases,
+  }) {
+    return Product(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      malayalamName: malayalamName ?? this.malayalamName,
+      category: category ?? this.category,
+      brand: brand ?? this.brand,
+      price: price ?? this.price,
+      gstPercentage: gstPercentage ?? this.gstPercentage,
+      unit: unit ?? this.unit,
+      stockQuantity: stockQuantity ?? this.stockQuantity,
+      barcode: barcode ?? this.barcode,
+      imagePath: imagePath ?? this.imagePath,
+      embeddingVector: embeddingVector ?? this.embeddingVector,
+      aliases: aliases ?? this.aliases,
+    );
+  }
 }
+

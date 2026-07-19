@@ -94,7 +94,6 @@ CREATE TABLE customer_ledger (
 
   Future _upgradeDB(Database db, int oldVersion, int newVersion) async {
     if (oldVersion < 2) {
-      // Add new tables for v2
       await db.execute('''
 CREATE TABLE IF NOT EXISTS customers (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -113,13 +112,13 @@ CREATE TABLE IF NOT EXISTS customer_ledger (
   FOREIGN KEY (customer_id) REFERENCES customers (id) ON DELETE CASCADE
 )
 ''');
-      // Add columns to bills table
       await db.execute("ALTER TABLE bills ADD COLUMN payment_mode TEXT NOT NULL DEFAULT 'CASH'");
       await db.execute("ALTER TABLE bills ADD COLUMN customer_id INTEGER");
     }
   }
 
-  // --- Product CRUD ---
+  // ─────────────────── Product CRUD ───────────────────
+
   Future<int> insertProduct(Product product) async {
     final db = await instance.database;
     return await db.insert('products', product.toMap());
@@ -127,8 +126,15 @@ CREATE TABLE IF NOT EXISTS customer_ledger (
 
   Future<List<Product>> getAllProducts() async {
     final db = await instance.database;
-    final result = await db.query('products');
+    final result = await db.query('products', orderBy: 'name ASC');
     return result.map((json) => Product.fromMap(json)).toList();
+  }
+
+  Future<Product?> getProductById(int id) async {
+    final db = await instance.database;
+    final result = await db.query('products', where: 'id = ?', whereArgs: [id]);
+    if (result.isEmpty) return null;
+    return Product.fromMap(result.first);
   }
 
   Future<int> updateProduct(Product product) async {
@@ -140,8 +146,63 @@ CREATE TABLE IF NOT EXISTS customer_ledger (
       whereArgs: [product.id],
     );
   }
-  
-  // --- Bill CRUD ---
+
+  Future<int> deleteProduct(int id) async {
+    final db = await instance.database;
+    return await db.delete('products', where: 'id = ?', whereArgs: [id]);
+  }
+
+  /// Search products by name, Malayalam name, category, brand, or aliases.
+  Future<List<Product>> searchProducts(String query) async {
+    final db = await instance.database;
+    final lowerQuery = '%${query.toLowerCase()}%';
+    final result = await db.rawQuery('''
+      SELECT * FROM products
+      WHERE LOWER(name) LIKE ?
+         OR LOWER(malayalamName) LIKE ?
+         OR LOWER(category) LIKE ?
+         OR LOWER(brand) LIKE ?
+         OR LOWER(aliases) LIKE ?
+      ORDER BY name ASC
+    ''', [lowerQuery, lowerQuery, lowerQuery, lowerQuery, lowerQuery]);
+    return result.map((json) => Product.fromMap(json)).toList();
+  }
+
+  /// Returns products with stock at or below the given threshold.
+  Future<List<Product>> getLowStockProducts({int threshold = 5}) async {
+    final db = await instance.database;
+    final result = await db.query(
+      'products',
+      where: 'stock_quantity <= ?',
+      whereArgs: [threshold],
+      orderBy: 'stock_quantity ASC',
+    );
+    return result.map((json) => Product.fromMap(json)).toList();
+  }
+
+  /// Returns the number of products in the database.
+  Future<int> getProductCount() async {
+    final db = await instance.database;
+    final result = await db.rawQuery('SELECT COUNT(*) as cnt FROM products');
+    return Sqflite.firstIntValue(result) ?? 0;
+  }
+
+  /// Seeds the database with an initial product catalog.
+  /// Only inserts if the products table is empty.
+  Future<void> seedFromCatalog(List<Product> catalog) async {
+    final count = await getProductCount();
+    if (count > 0) return; // Already seeded
+
+    final db = await instance.database;
+    final batch = db.batch();
+    for (final product in catalog) {
+      batch.insert('products', product.toMap());
+    }
+    await batch.commit(noResult: true);
+  }
+
+  // ─────────────────── Bill CRUD ───────────────────
+
   Future<int> insertBill(Bill bill) async {
     final db = await instance.database;
     return await db.insert('bills', bill.toMap());
@@ -150,6 +211,12 @@ CREATE TABLE IF NOT EXISTS customer_ledger (
   Future<int> insertBillItem(BillItem item) async {
     final db = await instance.database;
     return await db.insert('bill_items', item.toMap());
+  }
+
+  Future<List<Bill>> getAllBills() async {
+    final db = await instance.database;
+    final result = await db.query('bills', orderBy: 'created_at DESC');
+    return result.map((map) => Bill.fromMap(map)).toList();
   }
 
   Future<List<Bill>> getBillsByCustomer(int customerId) async {
@@ -163,7 +230,18 @@ CREATE TABLE IF NOT EXISTS customer_ledger (
     return result.map((map) => Bill.fromMap(map)).toList();
   }
 
-  // --- Customer CRUD ---
+  Future<List<BillItem>> getBillItems(int billId) async {
+    final db = await instance.database;
+    final result = await db.query(
+      'bill_items',
+      where: 'bill_id = ?',
+      whereArgs: [billId],
+    );
+    return result.map((map) => BillItem.fromMap(map)).toList();
+  }
+
+  // ─────────────────── Customer CRUD ───────────────────
+
   Future<int> insertCustomer(Customer customer) async {
     final db = await instance.database;
     return await db.insert('customers', customer.toMap());
@@ -201,7 +279,8 @@ CREATE TABLE IF NOT EXISTS customer_ledger (
     );
   }
 
-  // --- Customer Ledger (Settlements) ---
+  // ─────────────────── Customer Ledger ───────────────────
+
   Future<int> insertLedgerEntry(CustomerLedgerEntry entry) async {
     final db = await instance.database;
     // Reduce the customer's pending amount

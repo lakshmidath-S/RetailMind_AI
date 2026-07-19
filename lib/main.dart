@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'config/supabase_config.dart';
+import 'data/database_helper.dart';
 import 'data/product_catalog.dart';
 import 'models/product.dart';
 import 'models/bill_item.dart';
@@ -13,6 +14,7 @@ import 'services/sync_service.dart';
 import 'screens/login_screen.dart';
 import 'screens/customers_screen.dart';
 import 'screens/payment_screen.dart';
+import 'screens/products_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -20,6 +22,8 @@ void main() async {
     url: SupabaseConfig.url,
     publishableKey: SupabaseConfig.anonKey,
   );
+  // Seed the database with the initial catalog on first launch
+  await DatabaseHelper.instance.seedFromCatalog(productCatalog);
   SyncService.instance.startListening();
   runApp(const RetailMindApp());
 }
@@ -62,11 +66,41 @@ class AuthGate extends StatelessWidget {
   }
 }
 
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
   @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  final _db = DatabaseHelper.instance;
+  int _productCount = 0;
+  int _lowStockCount = 0;
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadStats();
+  }
+
+  Future<void> _loadStats() async {
+    final products = await _db.getAllProducts();
+    final lowStock = products.where((p) => p.stockQuantity <= 5).length;
+    if (mounted) {
+      setState(() {
+        _productCount = products.length;
+        _lowStockCount = lowStock;
+        _isLoading = false;
+      });
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('RetailMind AI'),
@@ -86,30 +120,103 @@ class HomeScreen extends StatelessWidget {
         ],
       ),
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+        child: RefreshIndicator(
+          onRefresh: _loadStats,
+          child: ListView(
+            padding: const EdgeInsets.all(20),
             children: [
+              // ─── Welcome ───
               Text(
-                'Ready to make a bill?',
-                style: Theme.of(context).textTheme.headlineSmall,
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Speak the items and quantities. RetailMind will prepare the bill for you.',
-                style: Theme.of(context).textTheme.bodyLarge,
-              ),
-              const Spacer(),
-              FilledButton.icon(
-                key: const Key('newBillButton'),
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute<void>(builder: (_) => const NewBillScreen()),
+                'Welcome back!',
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.bold,
                 ),
-                icon: const Icon(Icons.receipt_long),
-                label: const Text('New Bill'),
-                style: FilledButton.styleFrom(
-                  minimumSize: const Size.fromHeight(64),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Manage your shop, create bills with voice, and track inventory.',
+                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                  color: colors.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 24),
+
+              // ─── Quick Stats ───
+              if (!_isLoading)
+                Row(
+                  children: [
+                    Expanded(
+                      child: _StatCard(
+                        icon: Icons.inventory_2_outlined,
+                        label: 'Products',
+                        value: '$_productCount',
+                        color: colors.primary,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _StatCard(
+                        icon: Icons.warning_amber_rounded,
+                        label: 'Low Stock',
+                        value: '$_lowStockCount',
+                        color: _lowStockCount > 0 ? colors.error : Colors.green,
+                      ),
+                    ),
+                  ],
+                ),
+              const SizedBox(height: 28),
+
+              // ─── Quick Actions ───
+              Text(
+                'Quick Actions',
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 12),
+
+              // New Bill (primary action)
+              _ActionCard(
+                key: const Key('newBillButton'),
+                icon: Icons.mic_rounded,
+                title: 'New Voice Bill',
+                subtitle: 'Speak items and quantities to create a bill',
+                color: colors.primary,
+                isPrimary: true,
+                onTap: () async {
+                  await Navigator.of(context).push(
+                    MaterialPageRoute<void>(builder: (_) => const NewBillScreen()),
+                  );
+                  _loadStats(); // Refresh stats after billing
+                },
+              ),
+              const SizedBox(height: 12),
+
+              // Manage Products
+              _ActionCard(
+                key: const Key('manageProductsButton'),
+                icon: Icons.inventory_2_outlined,
+                title: 'Manage Products',
+                subtitle: 'Add, edit, delete products and update prices',
+                color: colors.tertiary,
+                badge: _lowStockCount > 0 ? '$_lowStockCount low' : null,
+                onTap: () async {
+                  await Navigator.of(context).push(
+                    MaterialPageRoute<void>(builder: (_) => const ProductsScreen()),
+                  );
+                  _loadStats();
+                },
+              ),
+              const SizedBox(height: 12),
+
+              // Customers / Khata
+              _ActionCard(
+                icon: Icons.people_outline,
+                title: 'Customers (Khata)',
+                subtitle: 'Manage customers and pending balances',
+                color: Colors.blue,
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(builder: (_) => const CustomersScreen()),
                 ),
               ),
             ],
@@ -119,6 +226,156 @@ class HomeScreen extends StatelessWidget {
     );
   }
 }
+
+class _StatCard extends StatelessWidget {
+  const _StatCard({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.color,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: color.withOpacity(0.2)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, color: color, size: 28),
+            const SizedBox(height: 12),
+            Text(
+              value,
+              style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                fontWeight: FontWeight.bold,
+                color: color,
+              ),
+            ),
+            Text(label, style: Theme.of(context).textTheme.bodySmall),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ActionCard extends StatelessWidget {
+  const _ActionCard({
+    super.key,
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.color,
+    required this.onTap,
+    this.isPrimary = false,
+    this.badge,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final Color color;
+  final VoidCallback onTap;
+  final bool isPrimary;
+  final String? badge;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+
+    return Card(
+      elevation: isPrimary ? 2 : 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: isPrimary
+            ? BorderSide.none
+            : BorderSide(color: color.withOpacity(0.2)),
+      ),
+      color: isPrimary ? color : null,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+          child: Row(
+            children: [
+              CircleAvatar(
+                backgroundColor: isPrimary
+                    ? Colors.white.withOpacity(0.2)
+                    : color.withOpacity(0.1),
+                radius: 24,
+                child: Icon(icon, color: isPrimary ? Colors.white : color, size: 28),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          title,
+                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.bold,
+                            color: isPrimary ? Colors.white : null,
+                          ),
+                        ),
+                        if (badge != null) ...[
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: colors.errorContainer,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              badge!,
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                                color: colors.error,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: isPrimary ? Colors.white70 : null,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(
+                Icons.chevron_right,
+                color: isPrimary ? Colors.white70 : color,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  BILLING SCREENS — Now fully DB-driven
+// ═══════════════════════════════════════════════════════════════
 
 class NewBillScreen extends StatefulWidget {
   const NewBillScreen({super.key});
@@ -248,7 +505,9 @@ class _ProcessingBillScreenState extends State<ProcessingBillScreen> {
   Future<void> _openDraftBill() async {
     if (!mounted) return;
     try {
-      final draft = await VoiceBillDecoder.decode(widget.audioPath, productCatalog);
+      // Load products from DB instead of hardcoded catalog
+      final dbProducts = await DatabaseHelper.instance.getAllProducts();
+      final draft = await VoiceBillDecoder.decode(widget.audioPath, dbProducts);
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
         MaterialPageRoute<void>(builder: (_) => DraftBillScreen(draft: draft)),
@@ -256,6 +515,12 @@ class _ProcessingBillScreenState extends State<ProcessingBillScreen> {
     } catch (e) {
       print('Error decoding bill: $e');
       if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to process voice: $e'),
+          backgroundColor: Theme.of(context).colorScheme.error,
+        ),
+      );
       Navigator.of(context).pop();
     }
   }
@@ -310,7 +575,7 @@ class DraftBillScreen extends StatefulWidget {
     : draft =
           draft ??
               const DecodedBill(
-                transcript: VoiceBillDecoder.demoTranscript,
+                transcript: '',
                 items: [],
               );
 
@@ -323,11 +588,17 @@ class DraftBillScreen extends StatefulWidget {
 class _DraftBillScreenState extends State<DraftBillScreen> {
   late final List<BillLine> _items;
   bool _isEditing = false;
+  List<Product> _allDbProducts = [];
 
   @override
   void initState() {
     super.initState();
     _items = widget.draft.items.map(BillLine.fromDecoded).toList();
+    _loadDbProducts();
+  }
+
+  Future<void> _loadDbProducts() async {
+    _allDbProducts = await DatabaseHelper.instance.getAllProducts();
   }
 
   double get _subtotal => _items.fold(0, (sum, item) => sum + item.subtotal);
@@ -335,24 +606,55 @@ class _DraftBillScreenState extends State<DraftBillScreen> {
   double get _total => _subtotal + _totalGst;
 
   Future<void> _addMissedItem() async {
+    // Wait for DB products to load if they haven't yet
+    if (_allDbProducts.isEmpty) {
+      _allDbProducts = await DatabaseHelper.instance.getAllProducts();
+    }
+
     final existingIds = _items.map((item) => item.product.id).toSet();
-    final availableProducts = productCatalog
+    final availableProducts = _allDbProducts
         .where((product) => !existingIds.contains(product.id))
         .toList();
-    if (availableProducts.isEmpty) return;
+    if (availableProducts.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('All products are already in the bill')),
+        );
+      }
+      return;
+    }
 
     final product = await showModalBottomSheet<Product>(
       context: context,
       showDragHandle: true,
-      builder: (context) => SafeArea(
-        child: ListView(
-          shrinkWrap: true,
+      isScrollControlled: true,
+      builder: (context) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.5,
+        minChildSize: 0.3,
+        maxChildSize: 0.8,
+        builder: (context, scrollController) => ListView(
+          controller: scrollController,
           children: [
-            const ListTile(title: Text('Add missed item')),
+            const ListTile(title: Text('Add missed item', style: TextStyle(fontWeight: FontWeight.bold))),
             for (final item in availableProducts)
               ListTile(
+                leading: CircleAvatar(
+                  backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+                  child: Text(item.name[0].toUpperCase()),
+                ),
                 title: Text(item.name),
-                subtitle: Text('${item.malayalamName} · ₹${item.price}'),
+                subtitle: Text(
+                  '${item.malayalamName.isNotEmpty ? '${item.malayalamName} · ' : ''}₹${item.price}'
+                  '${item.unit != null ? ' / ${item.unit}' : ''}',
+                ),
+                trailing: Text(
+                  '₹${item.price.toStringAsFixed(item.price == item.price.roundToDouble() ? 0 : 2)}',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                ),
                 onTap: () => Navigator.of(context).pop(item),
               ),
           ],
@@ -376,9 +678,10 @@ class _DraftBillScreenState extends State<DraftBillScreen> {
             children: [
               Text('Your bill is ready', style: Theme.of(context).textTheme.headlineSmall),
               const SizedBox(height: 8),
-              Text('Heard: "${widget.draft.transcript}"',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(fontStyle: FontStyle.italic),
-              ),
+              if (widget.draft.transcript.isNotEmpty)
+                Text('Heard: "${widget.draft.transcript}"',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(fontStyle: FontStyle.italic),
+                ),
               if (widget.draft.unmatchedSegments.isNotEmpty) ...[
                 const SizedBox(height: 8),
                 Card(
@@ -405,93 +708,116 @@ class _DraftBillScreenState extends State<DraftBillScreen> {
                 ),
               ],
               const SizedBox(height: 4),
-              const Text('Please check the items before you proceed.'),
-              const SizedBox(height: 16),
-              Expanded(
-                child: ListView.separated(
-                  itemCount: _items.length,
-                  separatorBuilder: (_, __) => const Divider(),
-                  itemBuilder: (context, index) => _BillLineTile(
-                    item: _items[index],
-                    isEditing: _isEditing,
-                    onRemove: () => setState(() => _items.removeAt(index)),
-                    onQuantityChanged: (change) => setState(() {
-                      _items[index].quantity =
-                          (_items[index].quantity + change).clamp(1, 99);
-                    }),
+              if (_items.isNotEmpty)
+                const Text('Please check the items before you proceed.'),
+              if (_items.isEmpty)
+                Expanded(
+                  child: Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.shopping_cart_outlined, size: 64,
+                          color: Theme.of(context).colorScheme.outline),
+                        const SizedBox(height: 16),
+                        const Text('No items matched from your voice input.'),
+                        const SizedBox(height: 8),
+                        OutlinedButton.icon(
+                          onPressed: _addMissedItem,
+                          icon: const Icon(Icons.add),
+                          label: const Text('Add items manually'),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-              ),
-              if (_isEditing)
-                OutlinedButton.icon(
-                  key: const Key('addItemButton'),
-                  onPressed: _addMissedItem,
-                  icon: const Icon(Icons.add),
-                  label: const Text('Add missed item'),
+              if (_items.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                Expanded(
+                  child: ListView.separated(
+                    itemCount: _items.length,
+                    separatorBuilder: (_, __) => const Divider(),
+                    itemBuilder: (context, index) => _BillLineTile(
+                      item: _items[index],
+                      isEditing: _isEditing,
+                      onRemove: () => setState(() => _items.removeAt(index)),
+                      onQuantityChanged: (change) => setState(() {
+                        _items[index].quantity =
+                            (_items[index].quantity + change).clamp(1, 99);
+                      }),
+                    ),
+                  ),
                 ),
-              const SizedBox(height: 12),
-              if (_totalGst > 0) ...[
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text('Subtotal'),
-                    Text('₹${_subtotal.toStringAsFixed(2)}'),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text('GST'),
-                    Text('₹${_totalGst.toStringAsFixed(2)}'),
-                  ],
-                ),
-                const Divider(),
-              ],
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text('Total', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
-                  Text('₹${_total.toStringAsFixed(2)}', style: Theme.of(context).textTheme.headlineSmall),
+                if (_isEditing)
+                  OutlinedButton.icon(
+                    key: const Key('addItemButton'),
+                    onPressed: _addMissedItem,
+                    icon: const Icon(Icons.add),
+                    label: const Text('Add missed item'),
+                  ),
+                const SizedBox(height: 12),
+                if (_totalGst > 0) ...[
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Subtotal'),
+                      Text('₹${_subtotal.toStringAsFixed(2)}'),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('GST'),
+                      Text('₹${_totalGst.toStringAsFixed(2)}'),
+                    ],
+                  ),
+                  const Divider(),
                 ],
-              ),
-              const SizedBox(height: 16),
-              if (!_isEditing)
-                OutlinedButton(
-                  key: const Key('editBillButton'),
-                  onPressed: () => setState(() => _isEditing = true),
-                  child: const Text('Correct bill'),
-                )
-              else
-                OutlinedButton(
-                  onPressed: () => setState(() => _isEditing = false),
-                  child: const Text('Done correcting'),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text('Total', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+                    Text('₹${_total.toStringAsFixed(2)}', style: Theme.of(context).textTheme.headlineSmall),
+                  ],
                 ),
-              const SizedBox(height: 12),
-              FilledButton(
-                key: const Key('proceedButton'),
-                onPressed: _items.isEmpty
-                    ? null
-                    : () {
-                        final billItems = _items.map((line) => BillItem(
-                          billId: 0, // Will be set by createCompleteBill
-                          productId: line.product.id ?? 0,
-                          quantity: line.quantity,
-                          priceAtTime: line.product.price,
-                        )).toList();
-                        Navigator.of(context).push(
-                          MaterialPageRoute<void>(
-                            builder: (_) => PaymentScreen(
-                              totalAmount: _total,
-                              totalGst: _totalGst,
-                              billItems: billItems,
+                const SizedBox(height: 16),
+                if (!_isEditing)
+                  OutlinedButton(
+                    key: const Key('editBillButton'),
+                    onPressed: () => setState(() => _isEditing = true),
+                    child: const Text('Correct bill'),
+                  )
+                else
+                  OutlinedButton(
+                    onPressed: () => setState(() => _isEditing = false),
+                    child: const Text('Done correcting'),
+                  ),
+                const SizedBox(height: 12),
+                FilledButton(
+                  key: const Key('proceedButton'),
+                  onPressed: _items.isEmpty
+                      ? null
+                      : () {
+                          final billItems = _items.map((line) => BillItem(
+                            billId: 0, // Will be set by createCompleteBill
+                            productId: line.product.id ?? 0,
+                            quantity: line.quantity,
+                            priceAtTime: line.product.price,
+                          )).toList();
+                          Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (_) => PaymentScreen(
+                                totalAmount: _total,
+                                totalGst: _totalGst,
+                                billItems: billItems,
+                              ),
                             ),
-                          ),
-                        );
-                      },
-                style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(56)),
-                child: const Text('Proceed to Payment'),
-              ),
+                          );
+                        },
+                  style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(56)),
+                  child: const Text('Proceed to Payment'),
+                ),
+              ],
             ],
           ),
         ),
