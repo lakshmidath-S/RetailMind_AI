@@ -1,10 +1,28 @@
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'config/supabase_config.dart';
 import 'data/product_catalog.dart';
 import 'models/product.dart';
+import 'models/bill_item.dart';
 import 'services/voice_bill_decoder.dart';
+import 'services/audio_recording_service.dart';
+import 'services/whisper_model_service.dart';
+import 'services/auth_service.dart';
+import 'services/sync_service.dart';
+import 'screens/login_screen.dart';
+import 'screens/customers_screen.dart';
+import 'screens/payment_screen.dart';
 
-void main() => runApp(const RetailMindApp());
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Supabase.initialize(
+    url: SupabaseConfig.url,
+    publishableKey: SupabaseConfig.anonKey,
+  );
+  SyncService.instance.startListening();
+  runApp(const RetailMindApp());
+}
 
 class RetailMindApp extends StatelessWidget {
   const RetailMindApp({super.key});
@@ -21,7 +39,25 @@ class RetailMindApp extends StatelessWidget {
         scaffoldBackgroundColor: const Color(0xFFF8FAF8),
         useMaterial3: true,
       ),
-      home: const HomeScreen(),
+      home: const AuthGate(),
+    );
+  }
+}
+
+/// Routes to LoginScreen or HomeScreen based on auth state.
+class AuthGate extends StatelessWidget {
+  const AuthGate({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<AuthState>(
+      stream: AuthService.authStateChanges,
+      builder: (context, snapshot) {
+        if (AuthService.isLoggedIn) {
+          return const HomeScreen();
+        }
+        return const LoginScreen();
+      },
     );
   }
 }
@@ -32,7 +68,23 @@ class HomeScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('RetailMind AI')),
+      appBar: AppBar(
+        title: const Text('RetailMind AI'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.people_outline),
+            tooltip: 'Customers',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(builder: (_) => const CustomersScreen()),
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.logout),
+            tooltip: 'Sign Out',
+            onPressed: () => AuthService.signOut(),
+          ),
+        ],
+      ),
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(24),
@@ -77,21 +129,38 @@ class NewBillScreen extends StatefulWidget {
 
 class _NewBillScreenState extends State<NewBillScreen> {
   bool _isListening = false;
+  final AudioRecordingService _audioService = AudioRecordingService();
+
+  @override
+  void dispose() {
+    _audioService.dispose();
+    super.dispose();
+  }
 
   Future<void> _toggleListening() async {
     if (!_isListening) {
-      setState(() => _isListening = true);
+      final hasPermission = await _audioService.hasPermission();
+      if (hasPermission) {
+        await WhisperModelService.getModelPath(); // Warm up model
+        await _audioService.startRecording();
+        setState(() => _isListening = true);
+      }
       return;
     }
 
+    final path = await _audioService.stopRecording();
     setState(() => _isListening = false);
-    await Navigator.of(context).push<void>(
-      MaterialPageRoute<void>(
-        builder: (_) => const ProcessingBillScreen(
-          transcript: VoiceBillDecoder.demoTranscript,
+    
+    if (path != null) {
+      if (!mounted) return;
+      await Navigator.of(context).push<void>(
+        MaterialPageRoute<void>(
+          builder: (_) => ProcessingBillScreen(
+            audioPath: path,
+          ),
         ),
-      ),
-    );
+      );
+    }
   }
 
   @override
@@ -161,9 +230,9 @@ class _NewBillScreenState extends State<NewBillScreen> {
 }
 
 class ProcessingBillScreen extends StatefulWidget {
-  const ProcessingBillScreen({required this.transcript, super.key});
+  const ProcessingBillScreen({required this.audioPath, super.key});
 
-  final String transcript;
+  final String audioPath;
 
   @override
   State<ProcessingBillScreen> createState() => _ProcessingBillScreenState();
@@ -177,12 +246,18 @@ class _ProcessingBillScreenState extends State<ProcessingBillScreen> {
   }
 
   Future<void> _openDraftBill() async {
-    await Future<void>.delayed(const Duration(seconds: 2));
     if (!mounted) return;
-    final draft = VoiceBillDecoder.decode(widget.transcript, productCatalog);
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute<void>(builder: (_) => DraftBillScreen(draft: draft)),
-    );
+    try {
+      final draft = await VoiceBillDecoder.decode(widget.audioPath, productCatalog);
+      if (!mounted) return;
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute<void>(builder: (_) => DraftBillScreen(draft: draft)),
+      );
+    } catch (e) {
+      print('Error decoding bill: $e');
+      if (!mounted) return;
+      Navigator.of(context).pop();
+    }
   }
 
   @override
@@ -223,9 +298,9 @@ class DraftBillScreen extends StatefulWidget {
   DraftBillScreen({DecodedBill? draft, super.key})
     : draft =
           draft ??
-              VoiceBillDecoder.decode(
-                VoiceBillDecoder.demoTranscript,
-                productCatalog,
+              const DecodedBill(
+                transcript: VoiceBillDecoder.demoTranscript,
+                items: [],
               );
 
   final DecodedBill draft;
@@ -337,9 +412,26 @@ class _DraftBillScreenState extends State<DraftBillScreen> {
               const SizedBox(height: 12),
               FilledButton(
                 key: const Key('proceedButton'),
-                onPressed: _items.isEmpty ? null : () {},
+                onPressed: _items.isEmpty
+                    ? null
+                    : () {
+                        final billItems = _items.map((line) => BillItem(
+                          billId: 0, // Will be set by createCompleteBill
+                          productId: line.product.id ?? 0,
+                          quantity: line.quantity,
+                          priceAtTime: line.product.price,
+                        )).toList();
+                        Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => PaymentScreen(
+                              totalAmount: _total,
+                              billItems: billItems,
+                            ),
+                          ),
+                        );
+                      },
                 style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(56)),
-                child: const Text('Proceed'),
+                child: const Text('Proceed to Payment'),
               ),
             ],
           ),

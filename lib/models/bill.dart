@@ -5,6 +5,8 @@ class Bill {
   final double totalGst;
   final double discount;
   final String status;
+  final String paymentMode; // 'CASH', 'UPI', or 'PAY_LATER'
+  final int? customerId;    // Required when paymentMode is PAY_LATER
 
   Bill({
     this.id,
@@ -13,6 +15,8 @@ class Bill {
     this.totalGst = 0.0,
     this.discount = 0.0,
     this.status = 'draft',
+    this.paymentMode = 'CASH',
+    this.customerId,
   });
 
   Map<String, dynamic> toMap() {
@@ -23,6 +27,8 @@ class Bill {
       'total_gst': totalGst,
       'discount': discount,
       'status': status,
+      'payment_mode': paymentMode,
+      'customer_id': customerId,
     };
   }
 
@@ -34,6 +40,8 @@ class Bill {
       totalGst: (map['total_gst'] as num?)?.toDouble() ?? 0.0,
       discount: (map['discount'] as num?)?.toDouble() ?? 0.0,
       status: map['status'] as String? ?? 'draft',
+      paymentMode: map['payment_mode'] as String? ?? 'CASH',
+      customerId: map['customer_id'] as int?,
     );
   }
 }

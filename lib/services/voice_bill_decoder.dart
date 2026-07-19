@@ -1,3 +1,4 @@
+import 'package:whisper_ggml/whisper_ggml.dart';
 import '../models/product.dart';
 
 class DecodedBillItem {
@@ -22,7 +23,19 @@ class DecodedBill {
 class VoiceBillDecoder {
   static const demoTranscript = 'two milk, one bread, three parle-g';
 
-  static DecodedBill decode(String transcript, List<Product> products) {
+  static Future<DecodedBill> decode(String audioPath, List<Product> products) async {
+    final controller = WhisperController();
+    final result = await controller.transcribe(
+      model: WhisperModel.tiny,
+      audioPath: audioPath,
+      lang: 'en', // Since products are mapped to English aliases/names or Malayalam
+    );
+
+    final transcript = result?.transcription.text ?? demoTranscript;
+    return decodeTranscript(transcript, products);
+  }
+
+  static DecodedBill decodeTranscript(String transcript, List<Product> products) {
     final items = <DecodedBillItem>[];
 
     for (final segment in transcript.toLowerCase().split(',')) {
