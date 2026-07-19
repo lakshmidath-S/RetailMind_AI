@@ -4,7 +4,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 
 class WhisperModelService {
-  static const String assetPath = 'assets/models/ggml-tiny.en.bin';
+  static const String assetPath = 'assets/models/ggml-tiny.bin';
   static const String targetName = 'ggml-tiny.bin'; // whisper_ggml expects this exact name
 
   static Future<String> getModelPath() async {

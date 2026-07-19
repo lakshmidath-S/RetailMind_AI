@@ -41,7 +41,7 @@ class VoiceBillDecoder {
     final result = await controller.transcribe(
       model: WhisperModel.tiny,
       audioPath: audioPath,
-      lang: 'en',
+      lang: 'auto',
     );
 
     final transcript = result?.transcription.text.trim();
