@@ -282,16 +282,27 @@ class _ProcessingBillScreenState extends State<ProcessingBillScreen> {
 }
 
 class BillLine {
-  BillLine({required this.product, required this.quantity});
+  BillLine({
+    required this.product,
+    required this.quantity,
+    this.confidence = 1.0,
+  });
 
   factory BillLine.fromDecoded(DecodedBillItem item) {
-    return BillLine(product: item.product, quantity: item.quantity);
+    return BillLine(
+      product: item.product,
+      quantity: item.quantity,
+      confidence: item.confidence,
+    );
   }
 
   final Product product;
   int quantity;
+  final double confidence;
 
-  double get total => quantity * product.price;
+  double get subtotal => quantity * product.price;
+  double get gstAmount => subtotal * (product.gstPercentage / 100);
+  double get total => subtotal + gstAmount;
 }
 
 class DraftBillScreen extends StatefulWidget {
@@ -319,7 +330,9 @@ class _DraftBillScreenState extends State<DraftBillScreen> {
     _items = widget.draft.items.map(BillLine.fromDecoded).toList();
   }
 
-  double get _total => _items.fold(0, (sum, item) => sum + item.total);
+  double get _subtotal => _items.fold(0, (sum, item) => sum + item.subtotal);
+  double get _totalGst => _items.fold(0, (sum, item) => sum + item.gstAmount);
+  double get _total => _subtotal + _totalGst;
 
   Future<void> _addMissedItem() async {
     final existingIds = _items.map((item) => item.product.id).toSet();
@@ -363,10 +376,37 @@ class _DraftBillScreenState extends State<DraftBillScreen> {
             children: [
               Text('Your bill is ready', style: Theme.of(context).textTheme.headlineSmall),
               const SizedBox(height: 8),
-              Text('Heard: "${widget.draft.transcript}"'),
+              Text('Heard: "${widget.draft.transcript}"',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(fontStyle: FontStyle.italic),
+              ),
+              if (widget.draft.unmatchedSegments.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Card(
+                  color: Theme.of(context).colorScheme.errorContainer,
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Row(
+                      children: [
+                        Icon(Icons.warning_amber_rounded,
+                          color: Theme.of(context).colorScheme.onErrorContainer, size: 20),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Could not match: ${widget.draft.unmatchedSegments.join(", ")}',
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.onErrorContainer,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
               const SizedBox(height: 4),
               const Text('Please check the items before you proceed.'),
-              const SizedBox(height: 20),
+              const SizedBox(height: 16),
               Expanded(
                 child: ListView.separated(
                   itemCount: _items.length,
@@ -390,11 +430,29 @@ class _DraftBillScreenState extends State<DraftBillScreen> {
                   label: const Text('Add missed item'),
                 ),
               const SizedBox(height: 12),
+              if (_totalGst > 0) ...[
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('Subtotal'),
+                    Text('₹${_subtotal.toStringAsFixed(2)}'),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('GST'),
+                    Text('₹${_totalGst.toStringAsFixed(2)}'),
+                  ],
+                ),
+                const Divider(),
+              ],
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text('Total'),
-                  Text('₹$_total', style: Theme.of(context).textTheme.headlineSmall),
+                  Text('Total', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+                  Text('₹${_total.toStringAsFixed(2)}', style: Theme.of(context).textTheme.headlineSmall),
                 ],
               ),
               const SizedBox(height: 16),
@@ -425,6 +483,7 @@ class _DraftBillScreenState extends State<DraftBillScreen> {
                           MaterialPageRoute<void>(
                             builder: (_) => PaymentScreen(
                               totalAmount: _total,
+                              totalGst: _totalGst,
                               billItems: billItems,
                             ),
                           ),
@@ -456,10 +515,23 @@ class _BillLineTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Confidence indicator color
+    final confColor = item.confidence >= 0.9
+        ? Colors.green
+        : item.confidence >= 0.7
+            ? Colors.orange
+            : Colors.red;
+
     return ListTile(
       contentPadding: EdgeInsets.zero,
+      leading: Tooltip(
+        message: '${(item.confidence * 100).toStringAsFixed(0)}% confidence',
+        child: Icon(Icons.circle, color: confColor, size: 12),
+      ),
       title: Text(item.product.name),
-      subtitle: Text('₹${item.product.price} each'),
+      subtitle: Text(
+        '₹${item.product.price} each${item.product.gstPercentage > 0 ? ' (+${item.product.gstPercentage.toStringAsFixed(0)}% GST)' : ''}',
+      ),
       trailing: isEditing
           ? Row(
               mainAxisSize: MainAxisSize.min,
@@ -470,7 +542,7 @@ class _BillLineTile extends StatelessWidget {
                 IconButton(onPressed: onRemove, icon: const Icon(Icons.delete_outline)),
               ],
             )
-          : Text('${item.quantity} × ₹${item.product.price} = ₹${item.total}'),
+          : Text('${item.quantity} × ₹${item.product.price} = ₹${item.subtotal.toStringAsFixed(2)}'),
     );
   }
 }

@@ -10,11 +10,13 @@ class PaymentScreen extends StatefulWidget {
   const PaymentScreen({
     required this.totalAmount,
     required this.billItems,
+    this.totalGst = 0.0,
     super.key,
   });
 
   final double totalAmount;
   final List<BillItem> billItems;
+  final double totalGst;
 
   @override
   State<PaymentScreen> createState() => _PaymentScreenState();
@@ -27,6 +29,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
     final bill = Bill(
       createdAt: DateTime.now(),
       totalAmount: widget.totalAmount,
+      totalGst: widget.totalGst,
       status: 'completed',
       paymentMode: paymentMode,
       customerId: customerId,
