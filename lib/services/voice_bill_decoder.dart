@@ -42,8 +42,10 @@ class VoiceBillDecoder {
   static Future<DecodedBill> decode(String audioPath, List<Product> products, {VoiceLanguage language = VoiceLanguage.english, void Function(int percent)? onProgress}) async {
     final controller = WhisperController();
     
-    // Use the medium model (Q5) everywhere as requested
-    final model = WhisperModel.medium;
+    // Reverting back to fast models to avoid 38s processing times on mobile CPUs
+    final model = language == VoiceLanguage.malayalam 
+        ? WhisperModel.small 
+        : WhisperModel.base;
 
     final result = await controller.transcribe(
       model: model,
