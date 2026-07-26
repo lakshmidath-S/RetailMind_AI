@@ -900,8 +900,20 @@ class _DraftBillScreenState extends State<DraftBillScreen> {
               Text('Your bill is ready', style: Theme.of(context).textTheme.headlineSmall),
               const SizedBox(height: 8),
               if (widget.draft.transcript.isNotEmpty)
-                Text('Heard: "${widget.draft.transcript}"',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(fontStyle: FontStyle.italic),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Heard: "${widget.draft.transcript}"',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(fontStyle: FontStyle.italic),
+                    ),
+                    if (widget.draft.inferenceTime != null)
+                      Text('Time to transcribe: ${widget.draft.inferenceTime!.inMilliseconds / 1000}s',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).colorScheme.primary,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                  ],
                 ),
               if (widget.draft.unmatchedSegments.isNotEmpty) ...[
                 const SizedBox(height: 8),

@@ -26,11 +26,13 @@ class DecodedBill {
     required this.transcript,
     required this.items,
     this.unmatchedSegments = const [],
+    this.inferenceTime,
   });
 
   final String transcript;
   final List<DecodedBillItem> items;
   final List<String> unmatchedSegments;
+  final Duration? inferenceTime;
 }
 
 class VoiceBillDecoder {
@@ -63,16 +65,17 @@ class VoiceBillDecoder {
         transcript: '',
         items: [],
         unmatchedSegments: ['No speech detected.'],
+        inferenceTime: result?.time,
       );
     }
     
-    return decodeTranscript(transcript, products);
+    return decodeTranscript(transcript, products, inferenceTime: result?.time);
   }
 
   /// Decode from a raw transcript string (used by tests and direct input).
   /// Now uses the full intelligence pipeline:
   ///   Normalize → Split → Parse quantities → Match products
-  static DecodedBill decodeTranscript(String transcript, List<Product> products) {
+  static DecodedBill decodeTranscript(String transcript, List<Product> products, {Duration? inferenceTime}) {
     // Step 1: Normalize
     final normalized = TranscriptNormalizer.normalize(transcript);
 
@@ -106,6 +109,7 @@ class VoiceBillDecoder {
       transcript: transcript,
       items: items,
       unmatchedSegments: unmatched,
+      inferenceTime: inferenceTime,
     );
   }
 }
