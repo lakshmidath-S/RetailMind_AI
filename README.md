@@ -1,93 +1,136 @@
 # RetailMind AI
 
-RetailMind AI is a mobile-first retail management app for small businesses. It combines fast billing, inventory management, sales analytics, and a simple business dashboard in one place.
+An offline-first, AI-powered retail management app for small Indian shops. Combines **voice-driven billing**, inventory management, customer ledger (Khata), and cloud sync — all running on-device with no internet required for core operations.
 
-The first release is designed for Malayalam- and English-speaking retailers, with voice assistance focused exclusively on the billing experience.
+Built for Malayalam- and English-speaking retailers who want fast, hands-free billing.
 
-## Key features
+## Features
 
-- **Fast billing:** Create a bill by speaking several products and quantities at once.
-- **Voice-assisted billing:** Speak short Malayalam or English commands to add, remove, search for, or change the quantity of products in the active bill.
-- **Multilingual experience:** Malayalam and English interface and product-name support.
-- **Inventory management:** Automatically reduce stock after a completed sale and surface low-stock alerts.
-- **Sales analytics:** Track sales, popular products, payment methods, and business trends.
-- **Business dashboard:** See today's sales, important inventory alerts, and quick actions at a glance.
+### Voice Billing
+- **Live transcription** — see words appear in real-time as you speak; no waiting for a loading screen.
+- **Multi-item voice input** — say all items and quantities in one go, in Malayalam or English.
+- **Smart product matching** — a 4-strategy engine (exact → alias → fuzzy Levenshtein → phonetic Soundex) maps spoken words to your catalogue.
+- **Transcript normalization** — handles Whisper hallucinations, filler words, and converts number words (English, Malayalam, Hindi) to digits automatically.
+- **Draft bill review** — always shows the proposed bill for correction before finalizing.
 
-## Voice billing
+### Inventory Management
+- Full product CRUD with multilingual names, aliases, categories, brands, units, and GST percentages.
+- Automatic stock deduction on bill completion.
+- Low-stock alerts with configurable threshold.
+- Search across name, Malayalam name, brand, category, and aliases.
 
-Voice input is available only on the **New Bill** screen. Before recording, the shopkeeper sees only one meaningful action: start recording. All correction controls appear only after a draft bill has been generated.
+### Payments & Customer Ledger (Khata)
+- Three payment modes: **Cash**, **UPI**, **Pay Later**.
+- Pay Later automatically creates a customer ledger entry and tracks pending balances.
+- Customer management with payment history and ledger entries.
 
-Example commands:
+### Offline-First Architecture
+- All data lives in a local **SQLite** database — the app works fully without internet.
+- When connectivity is restored, data syncs to **Supabase** automatically.
+- Supabase-based email/password authentication for multi-device cloud sync.
 
-- `രണ്ട് പാൽ ചേർക്കൂ` — Add 2 milk items
-- `ഒരു ബ്രെഡ് ഒഴിവാക്കൂ` — Remove 1 bread item
-- `പഞ്ചസാര മൂന്ന് ആക്കൂ` — Set sugar quantity to 3
-- `സോപ്പ് കാണിക്കൂ` — Search for soap
+## Technology Stack
 
-### Voice workflow
+| Component | Technology |
+|---|---|
+| **Framework** | Flutter (Dart) |
+| **Speech-to-Text** | `whisper_ggml` v2.4.0 — on-device whisper.cpp v1.9.1 |
+| **Live Transcription** | `transcribeLive` with PCM16 streaming via the `record` package |
+| **Local Database** | `sqflite` (5 tables: products, bills, bill\_items, customers, customer\_ledger) |
+| **Cloud Backend** | Supabase (Auth + Postgres) |
+| **Sync** | `connectivity_plus` — auto-sync on reconnect |
+| **Platform** | Android (primary), iOS (supported) |
 
-1. The shopkeeper opens a new bill and taps the microphone.
-2. They speak a short product command in Malayalam or English.
-3. OpenAI Whisper converts speech to text.
-4. RetailMind separates the spoken items, matches them against the store's product catalogue and aliases, and fetches their stored prices.
-5. The proposed bill is shown for confirmation.
-6. If an item is incorrect, the shopkeeper enters correction mode and changes only that item.
-7. The cart and total update after confirmation; payment and receipt sharing remain touch-based.
+### Whisper Models
 
-For better recognition, products should support Malayalam names, English names, and local spoken aliases. For example, `പാൽ`, `milk`, and `paal` can identify the same product.
+| Language | Model | Tier | Rationale |
+|---|---|---|---|
+| English | `WhisperModel.base` | Base (~142 MB) | Best speed/accuracy balance for English |
+| Malayalam | `WhisperModel.small` | Small (~466 MB) | Better multilingual capacity needed for regional languages |
 
-## Technology direction
-
-- **Platform:** Mobile-first application
-- **Speech-to-text:** OpenAI `whisper-1` transcription model
-- **Voice languages:** Malayalam (`ml`) and English (`en`)
-- **Core modules:** Billing, inventory, analytics, and business dashboard
-
-When the spoken language is known, the app can pass `ml` or `en` with the transcription request to improve recognition. For mixed Malayalam-English speech, it can use language detection. The app should always display the transcript and proposed bill change before applying it.
-
-## Product workflow
+## Voice Billing Workflow
 
 ```mermaid
-flowchart LR
-    A[Open new bill] --> B[Tap microphone]
-    B --> C[Speak Malayalam or English command]
-    C --> D[Whisper transcription]
-    D --> E[Match product and billing intent]
-    E --> F{Confident match?}
-    F -->|Yes| G[Show proposed cart change]
-    F -->|No| H[Choose the correct product]
-    H --> G
-    G --> I[Confirm and update cart]
-    I --> J[Touch-based payment and receipt]
-    J --> K[Update inventory and analytics]
+sequenceDiagram
+    participant U as Shopkeeper
+    participant App as NewBillScreen
+    participant W as Whisper (on-device)
+    participant M as MatchingEngine
+
+    U->>App: Tap microphone
+    App->>W: Start live PCM stream
+    loop While speaking
+        W-->>App: Partial transcript (real-time)
+        App-->>U: Display live text
+    end
+    U->>App: Tap stop
+    App->>W: Finalize transcript
+    W-->>App: Final transcript
+    App->>M: Normalize → Parse → Match
+    M-->>App: DecodedBill (matched items)
+    App-->>U: Draft bill for review
+    U->>App: Correct if needed → Proceed to payment
 ```
 
-## MVP scope
+## Example Voice Commands
 
-1. Malayalam and English UI support.
-2. Product catalogue with multilingual names, aliases, and database-owned prices.
-3. Push-to-talk voice billing on the New Bill screen.
-4. Processing and editable draft-bill confirmation screens.
-5. Touch confirmation before applying voice-driven cart changes.
-6. Inventory deduction, low-stock alerts, receipts, and basic sales reports.
+| Spoken (Malayalam) | Meaning |
+|---|---|
+| `രണ്ട് പാൽ ഒരു ബ്രെഡ്` | 2 milk, 1 bread |
+| `മൂന്ന് പഞ്ചസാര` | 3 sugar |
 
-## Current implementation
+| Spoken (English) | Meaning |
+|---|---|
+| `two milk one bread three sugar` | 2 milk, 1 bread, 3 sugar |
+| `half dozen eggs` | 6 eggs |
 
-The Flutter app is currently transitioning to a fully offline, AI-driven billing architecture. Recent updates include:
+## Project Structure
 
-1. **Local Database:** Implemented a robust SQLite database (`sqflite`) with core models for Products (including aliases and embeddings), Bills, and Bill Items.
-2. **Voice Billing UI:** A minimal recording screen with a start/stop voice toggle, with explicit language selection (English / Malayalam).
-3. **Offline On-Device AI:** Integrated `whisper.cpp` via the `whisper_ggml` plugin. The app now natively runs a fine-tuned Malayalam Whisper Medium model (Q4_0, ~424MB) purely offline on the device for transcribing Malayalam voice bills.
-4. **Draft Bill Review:** Generated from structured product-and-quantity results, allowing optional correction (remove items, adjust quantities, add missed catalogue items).
+```
+lib/
+├── main.dart                       # App entry, auth gate, home, billing screens
+├── config/
+│   └── supabase_config.dart        # Supabase URL + anon key
+├── data/
+│   ├── database_helper.dart        # SQLite CRUD, transactions, seed logic
+│   └── product_catalog.dart        # Initial seed catalogue
+├── models/
+│   ├── product.dart                # Product with aliases, embeddings, GST
+│   ├── bill.dart                   # Bill header
+│   ├── bill_item.dart              # Line items
+│   ├── customer.dart               # Customer record
+│   └── customer_ledger.dart        # Khata payment entries
+├── screens/
+│   ├── login_screen.dart           # Email/password auth
+│   ├── products_screen.dart        # Product list with search
+│   ├── add_edit_product_screen.dart # Product form
+│   ├── customers_screen.dart       # Customer list + ledger
+│   └── payment_screen.dart         # Cash / UPI / Pay Later
+└── services/
+    ├── audio_recording_service.dart # Mic recording (WAV + PCM stream)
+    ├── auth_service.dart           # Supabase auth wrapper
+    ├── whisper_model_service.dart   # Model path management
+    ├── voice_bill_decoder.dart     # Audio → transcript → bill pipeline
+    ├── transcript_normalizer.dart  # Cleanup, filler removal, number conversion
+    ├── quantity_parser.dart        # Extract qty + product text from segments
+    ├── matching_engine.dart        # 4-strategy product matching
+    └── sync_service.dart           # Offline-first Supabase sync
+```
 
-## Future Enhancements
+## Getting Started
 
-- **Live Transcription (Streaming):** Transition the `whisper.cpp` architecture from "record-then-process" to `transcribeLive`. By processing the audio stream chunk-by-chunk while the user is actively speaking, perceived latency will drop to near-zero, making the voice billing feel instantaneous.
+1. **Clone** the repo and run `flutter pub get`.
+2. **Configure Supabase** — add your URL and anon key in `lib/config/supabase_config.dart`.
+3. **Models** — Whisper models auto-download on first use. For fully offline use, place GGML model files in `assets/models/`.
+4. **Run** on a physical Android device: `flutter run --release` (release mode recommended for Whisper performance).
 
 ## Security
 
-The app blocks cleartext network traffic on Android and keeps iOS App Transport Security enabled. API keys and other secrets are excluded from Git and must never be shipped in the mobile app. Future voice transcription will go through a RetailMind backend, which securely holds the OpenAI key and returns only a validated draft bill to the device. See [the security baseline](docs/security.md) for the required controls and future protocol.
+- Cleartext network traffic blocked on Android; ATS enabled on iOS.
+- API keys excluded from Git.
+- Supabase anon key used only for auth; row-level security enforced server-side.
+- See [docs/security.md](docs/security.md) for the full security baseline.
 
-## Codex contribution
+## License
 
-This project is being developed with assistance from OpenAI Codex. Codex has helped translate the product workflow into the Flutter foundation, create the initial voice-billing screens and tests, and maintain this README as the implementation evolves. Product requirements, business decisions, and final review remain with the project owner.
+MIT — see [LICENSE](LICENSE).

@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:whisper_ggml/whisper_ggml.dart';
 
 import 'config/supabase_config.dart';
 import 'data/database_helper.dart';
@@ -389,46 +391,139 @@ class _NewBillScreenState extends State<NewBillScreen> {
   VoiceLanguage _selectedLanguage = VoiceLanguage.english;
   final AudioRecordingService _audioService = AudioRecordingService();
 
+  // ── Live transcription state ──
+  final WhisperController _whisperController = WhisperController();
+  WhisperLiveSession? _liveSession;
+  StreamSubscription<String>? _partialsSub;
+  String _liveTranscript = '';
+  bool _isProcessing = false;
+
   @override
   void dispose() {
+    _partialsSub?.cancel();
     _audioService.dispose();
     super.dispose();
   }
 
   Future<void> _toggleListening() async {
+    if (_isProcessing) return;
+
     if (!_isListening) {
+      // ─── Start live transcription ───
       final hasPermission = await _audioService.hasPermission();
-      if (hasPermission) {
-        await WhisperModelService.getModelPath(_selectedLanguage); // Warm up model
-        await _audioService.startRecording();
-        setState(() => _isListening = true);
+      if (!hasPermission) return;
+
+      setState(() {
+        _liveTranscript = '';
+        _isListening = true;
+      });
+
+      try {
+        // Start PCM stream from microphone
+        final pcmStream = await _audioService.startStream();
+
+        // Choose model based on language
+        final model = _selectedLanguage == VoiceLanguage.malayalam
+            ? WhisperModel.small
+            : WhisperModel.base;
+
+        // Start live transcription session
+        _liveSession = await _whisperController.transcribeLive(
+          model: model,
+          pcm16Stream: pcmStream,
+          lang: _selectedLanguage.code,
+          suppressNonSpeechTokens: true,
+        );
+
+        // Listen for partial transcripts and update UI in real-time
+        _partialsSub = _liveSession!.partials.listen((text) {
+          if (mounted) {
+            setState(() => _liveTranscript = text.trim());
+          }
+        });
+      } catch (e) {
+        print('Error starting live transcription: $e');
+        setState(() => _isListening = false);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Failed to start transcription: $e'),
+              backgroundColor: Theme.of(context).colorScheme.error,
+            ),
+          );
+        }
       }
       return;
     }
 
-    final path = await _audioService.stopRecording();
-    setState(() => _isListening = false);
-    
-    if (path != null) {
+    // ─── Stop recording & finalize ───
+    setState(() => _isProcessing = true);
+    await _partialsSub?.cancel();
+    _partialsSub = null;
+
+    try {
+      await _audioService.stopStream();
+      final finalText = await _liveSession?.stop();
+      _liveSession = null;
+
+      final transcript = (finalText ?? _liveTranscript).trim();
+
+      setState(() {
+        _isListening = false;
+        _isProcessing = false;
+        _liveTranscript = transcript;
+      });
+
+      if (transcript.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('No speech detected. Try again.')),
+          );
+        }
+        return;
+      }
+
+      // Decode the transcript directly — no need for file-based processing
+      if (!mounted) return;
+      final dbProducts = await DatabaseHelper.instance.getAllProducts();
+      final draft = VoiceBillDecoder.decodeTranscript(transcript, dbProducts);
+
       if (!mounted) return;
       await Navigator.of(context).push<void>(
         MaterialPageRoute<void>(
-          builder: (_) => ProcessingBillScreen(
-            audioPath: path,
-            language: _selectedLanguage,
-          ),
+          builder: (_) => DraftBillScreen(draft: draft),
         ),
       );
+    } catch (e) {
+      print('Error finalizing transcription: $e');
+      setState(() {
+        _isListening = false;
+        _isProcessing = false;
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Transcription error: $e'),
+            backgroundColor: Theme.of(context).colorScheme.error,
+          ),
+        );
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    final heading = _isListening ? 'Listening...' : 'Create a bill by voice';
-    final instruction = _isListening
-        ? 'Say all items and quantities. Tap the microphone again when you finish.'
-        : 'Tap the microphone, then speak the items and quantities.';
+    final heading = _isProcessing
+        ? 'Processing...'
+        : _isListening
+            ? 'Listening...'
+            : 'Create a bill by voice';
+    final instruction = _isProcessing
+        ? 'Finalizing your transcript.'
+        : _isListening
+            ? 'Say all items and quantities. Tap the microphone again when you finish.'
+            : 'Tap the microphone, then speak the items and quantities.';
 
     return Scaffold(
       appBar: AppBar(title: const Text('New Bill')),
@@ -438,41 +533,99 @@ class _NewBillScreenState extends State<NewBillScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Spacer(),
+              const SizedBox(height: 8),
               SegmentedButton<VoiceLanguage>(
                 segments: const [
                   ButtonSegment(value: VoiceLanguage.english, label: Text('English')),
                   ButtonSegment(value: VoiceLanguage.malayalam, label: Text('മലയാളം')),
                 ],
                 selected: {_selectedLanguage},
-                onSelectionChanged: (Set<VoiceLanguage> newSelection) {
-                  setState(() {
-                    _selectedLanguage = newSelection.first;
-                  });
-                },
+                onSelectionChanged: _isListening
+                    ? null // Disable switching while recording
+                    : (Set<VoiceLanguage> newSelection) {
+                        setState(() {
+                          _selectedLanguage = newSelection.first;
+                        });
+                      },
               ),
               const SizedBox(height: 24),
               Icon(
-                _isListening ? Icons.graphic_eq : Icons.mic_none_rounded,
-                size: 88,
+                _isProcessing
+                    ? Icons.hourglass_top_rounded
+                    : _isListening
+                        ? Icons.graphic_eq
+                        : Icons.mic_none_rounded,
+                size: 64,
                 color: _isListening ? colors.error : colors.primary,
               ),
-              const SizedBox(height: 28),
+              const SizedBox(height: 16),
               Text(
                 heading,
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.headlineSmall,
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 8),
               Text(
                 instruction,
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.bodyLarge,
               ),
-              const Spacer(),
+              const SizedBox(height: 20),
+
+              // ── Live transcript display ──
+              Expanded(
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: colors.surfaceContainerHighest.withOpacity(0.4),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: _isListening
+                          ? colors.primary.withOpacity(0.4)
+                          : colors.outline.withOpacity(0.2),
+                      width: _isListening ? 1.5 : 1,
+                    ),
+                  ),
+                  child: SingleChildScrollView(
+                    reverse: true, // Auto-scroll to bottom as text grows
+                    child: _liveTranscript.isEmpty
+                        ? Text(
+                            _isListening
+                                ? 'Waiting for speech...'
+                                : 'Your transcript will appear here while you speak.',
+                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                              color: colors.onSurfaceVariant.withOpacity(0.5),
+                              fontStyle: FontStyle.italic,
+                            ),
+                          )
+                        : Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Icon(
+                                Icons.format_quote_rounded,
+                                size: 18,
+                                color: colors.primary.withOpacity(0.5),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  _liveTranscript,
+                                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                                    height: 1.5,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+
               FilledButton(
                 key: const Key('voiceToggleButton'),
-                onPressed: _toggleListening,
+                onPressed: _isProcessing ? null : _toggleListening,
                 style: FilledButton.styleFrom(
                   backgroundColor: _isListening ? colors.error : colors.primary,
                   minimumSize: const Size.fromHeight(72),
@@ -481,17 +634,35 @@ class _NewBillScreenState extends State<NewBillScreen> {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(_isListening ? Icons.stop_rounded : Icons.mic_rounded),
+                    if (_isProcessing)
+                      const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    else
+                      Icon(_isListening ? Icons.stop_rounded : Icons.mic_rounded),
                     const SizedBox(width: 12),
-                    Text(_isListening ? 'Stop recording' : 'Start recording'),
+                    Text(_isProcessing
+                        ? 'Processing...'
+                        : _isListening
+                            ? 'Stop recording'
+                            : 'Start recording'),
                   ],
                 ),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 12),
               Text(
-                'You can review and correct the bill after recording.',
+                _isListening
+                    ? 'Live transcript appears above as you speak.'
+                    : 'You can review and correct the bill after recording.',
                 textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodyMedium,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: colors.onSurfaceVariant,
+                ),
               ),
             ],
           ),
