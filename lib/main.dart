@@ -569,8 +569,9 @@ class _ProcessingBillScreenState extends State<ProcessingBillScreen> {
   // Rough model speed factors (seconds of processing per second of audio)
   // These are conservative estimates for mid-range Android devices.
   static const _speedFactors = <WhisperModel, double>{
-    WhisperModel.base: 0.8,  // base processes ~1s audio in ~0.8s
-    WhisperModel.small: 2.5, // small is ~3× slower
+    WhisperModel.base: 0.8,
+    WhisperModel.small: 2.5,
+    WhisperModel.medium: 4.0, // medium Q5 is ~4× slower
   };
 
   @override
@@ -615,9 +616,8 @@ class _ProcessingBillScreenState extends State<ProcessingBillScreen> {
     if (!mounted) return;
 
     // Show initial estimate based on recording duration and model
-    final model = widget.language == VoiceLanguage.malayalam
-        ? WhisperModel.small
-        : WhisperModel.base;
+    // We use the medium model (Q5) for both languages now
+    final model = WhisperModel.medium;
     if (widget.recordingDuration != null) {
       final factor = _speedFactors[model] ?? 1.5;
       final estimatedSeconds = (widget.recordingDuration!.inSeconds * factor).ceil();

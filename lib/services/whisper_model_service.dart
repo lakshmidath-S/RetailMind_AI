@@ -14,30 +14,16 @@ enum VoiceLanguage {
 }
 
 class WhisperModelService {
-  // ── English model (base — fast, good for English) ──
-  static const String _baseAssetPath = 'assets/models/ggml-base.bin';
-  static const String _baseFileName = 'ggml-base.bin';
-
-  // ── Malayalam model (small — better multilingual capacity) ──
-  static const String _smallAssetPath = 'assets/models/ggml-small.bin';
-  static const String _smallFileName = 'ggml-small.bin';
+  // ── English & Malayalam model (Medium Q5) ──
+  static const String _q5AssetPath = 'assets/models/ggml-model-q5_0.bin';
+  static const String _mediumFileName = 'ggml-medium.bin'; // whisper_ggml expects this name for WhisperModel.medium
 
   /// Returns the path to the appropriate model for the given language.
   /// Copies from assets to local storage if not already present.
   static Future<String> getModelPath(VoiceLanguage language) async {
-    final String assetPath;
-    final String fileName;
-
-    switch (language) {
-      case VoiceLanguage.english:
-        assetPath = _baseAssetPath;
-        fileName = _baseFileName;
-        break;
-      case VoiceLanguage.malayalam:
-        assetPath = _smallAssetPath;
-        fileName = _smallFileName;
-        break;
-    }
+    // The user requested to use the Q5 model everywhere
+    const assetPath = _q5AssetPath;
+    const fileName = _mediumFileName;
 
     final supportDir = await getApplicationSupportDirectory();
     final modelFile = File(p.join(supportDir.path, fileName));
