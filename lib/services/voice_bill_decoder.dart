@@ -37,7 +37,7 @@ class VoiceBillDecoder {
 
 
   /// Full pipeline: audio → Whisper transcription → normalizer → parser → matcher.
-  static Future<DecodedBill> decode(String audioPath, List<Product> products, {VoiceLanguage language = VoiceLanguage.english}) async {
+  static Future<DecodedBill> decode(String audioPath, List<Product> products, {VoiceLanguage language = VoiceLanguage.english, void Function(int percent)? onProgress}) async {
     final controller = WhisperController();
     
     // Choose model based on language
@@ -51,6 +51,7 @@ class VoiceBillDecoder {
       lang: language.code,
       noContext: true, // Speeds up single-utterance decoding
       suppressNonSpeechTokens: true, // Prevents wasting time on background noise
+      onProgress: onProgress,
     );
 
     final transcript = result?.transcription.text.trim();

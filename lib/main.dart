@@ -391,139 +391,73 @@ class _NewBillScreenState extends State<NewBillScreen> {
   VoiceLanguage _selectedLanguage = VoiceLanguage.english;
   final AudioRecordingService _audioService = AudioRecordingService();
 
-  // ── Live transcription state ──
-  final WhisperController _whisperController = WhisperController();
-  WhisperLiveSession? _liveSession;
-  StreamSubscription<String>? _partialsSub;
-  String _liveTranscript = '';
-  bool _isProcessing = false;
+  // ── Recording timer ──
+  final Stopwatch _recordingStopwatch = Stopwatch();
+  Timer? _timerTick;
+  Duration _recordingDuration = Duration.zero;
 
   @override
   void dispose() {
-    _partialsSub?.cancel();
+    _timerTick?.cancel();
     _audioService.dispose();
     super.dispose();
   }
 
   Future<void> _toggleListening() async {
-    if (_isProcessing) return;
-
     if (!_isListening) {
-      // ─── Start live transcription ───
       final hasPermission = await _audioService.hasPermission();
-      if (!hasPermission) return;
-
-      setState(() {
-        _liveTranscript = '';
-        _isListening = true;
-      });
-
-      try {
-        // Start PCM stream from microphone
-        final pcmStream = await _audioService.startStream();
-
-        // Choose model based on language
-        final model = _selectedLanguage == VoiceLanguage.malayalam
-            ? WhisperModel.small
-            : WhisperModel.base;
-
-        // Start live transcription session
-        _liveSession = await _whisperController.transcribeLive(
-          model: model,
-          pcm16Stream: pcmStream,
-          lang: _selectedLanguage.code,
-          suppressNonSpeechTokens: true,
-        );
-
-        // Listen for partial transcripts and update UI in real-time
-        _partialsSub = _liveSession!.partials.listen((text) {
+      if (hasPermission) {
+        await WhisperModelService.getModelPath(_selectedLanguage); // Warm up model
+        await _audioService.startRecording();
+        _recordingStopwatch.reset();
+        _recordingStopwatch.start();
+        _timerTick = Timer.periodic(const Duration(milliseconds: 500), (_) {
           if (mounted) {
-            setState(() => _liveTranscript = text.trim());
+            setState(() => _recordingDuration = _recordingStopwatch.elapsed);
           }
         });
-      } catch (e) {
-        print('Error starting live transcription: $e');
-        setState(() => _isListening = false);
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Failed to start transcription: $e'),
-              backgroundColor: Theme.of(context).colorScheme.error,
-            ),
-          );
-        }
+        setState(() {
+          _isListening = true;
+          _recordingDuration = Duration.zero;
+        });
       }
       return;
     }
 
-    // ─── Stop recording & finalize ───
-    setState(() => _isProcessing = true);
-    await _partialsSub?.cancel();
-    _partialsSub = null;
+    // ─── Stop recording ───
+    _recordingStopwatch.stop();
+    _timerTick?.cancel();
+    final duration = _recordingStopwatch.elapsed;
+    final path = await _audioService.stopRecording();
+    setState(() => _isListening = false);
 
-    try {
-      await _audioService.stopStream();
-      final finalText = await _liveSession?.stop();
-      _liveSession = null;
-
-      final transcript = (finalText ?? _liveTranscript).trim();
-
-      setState(() {
-        _isListening = false;
-        _isProcessing = false;
-        _liveTranscript = transcript;
-      });
-
-      if (transcript.isEmpty) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('No speech detected. Try again.')),
-          );
-        }
-        return;
-      }
-
-      // Decode the transcript directly — no need for file-based processing
-      if (!mounted) return;
-      final dbProducts = await DatabaseHelper.instance.getAllProducts();
-      final draft = VoiceBillDecoder.decodeTranscript(transcript, dbProducts);
-
+    if (path != null) {
       if (!mounted) return;
       await Navigator.of(context).push<void>(
         MaterialPageRoute<void>(
-          builder: (_) => DraftBillScreen(draft: draft),
+          builder: (_) => ProcessingBillScreen(
+            audioPath: path,
+            language: _selectedLanguage,
+            recordingDuration: duration,
+          ),
         ),
       );
-    } catch (e) {
-      print('Error finalizing transcription: $e');
-      setState(() {
-        _isListening = false;
-        _isProcessing = false;
-      });
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Transcription error: $e'),
-            backgroundColor: Theme.of(context).colorScheme.error,
-          ),
-        );
-      }
     }
+  }
+
+  String _formatDuration(Duration d) {
+    final minutes = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final seconds = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return '$minutes:$seconds';
   }
 
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    final heading = _isProcessing
-        ? 'Processing...'
-        : _isListening
-            ? 'Listening...'
-            : 'Create a bill by voice';
-    final instruction = _isProcessing
-        ? 'Finalizing your transcript.'
-        : _isListening
-            ? 'Say all items and quantities. Tap the microphone again when you finish.'
-            : 'Tap the microphone, then speak the items and quantities.';
+    final heading = _isListening ? 'Listening...' : 'Create a bill by voice';
+    final instruction = _isListening
+        ? 'Say all items and quantities. Tap the microphone again when you finish.'
+        : 'Tap the microphone, then speak the items and quantities.';
 
     return Scaffold(
       appBar: AppBar(title: const Text('New Bill')),
@@ -533,7 +467,7 @@ class _NewBillScreenState extends State<NewBillScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const SizedBox(height: 8),
+              const Spacer(),
               SegmentedButton<VoiceLanguage>(
                 segments: const [
                   ButtonSegment(value: VoiceLanguage.english, label: Text('English')),
@@ -541,7 +475,7 @@ class _NewBillScreenState extends State<NewBillScreen> {
                 ],
                 selected: {_selectedLanguage},
                 onSelectionChanged: _isListening
-                    ? null // Disable switching while recording
+                    ? null
                     : (Set<VoiceLanguage> newSelection) {
                         setState(() {
                           _selectedLanguage = newSelection.first;
@@ -550,12 +484,8 @@ class _NewBillScreenState extends State<NewBillScreen> {
               ),
               const SizedBox(height: 24),
               Icon(
-                _isProcessing
-                    ? Icons.hourglass_top_rounded
-                    : _isListening
-                        ? Icons.graphic_eq
-                        : Icons.mic_none_rounded,
-                size: 64,
+                _isListening ? Icons.graphic_eq : Icons.mic_none_rounded,
+                size: 88,
                 color: _isListening ? colors.error : colors.primary,
               ),
               const SizedBox(height: 16),
@@ -570,62 +500,22 @@ class _NewBillScreenState extends State<NewBillScreen> {
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.bodyLarge,
               ),
-              const SizedBox(height: 20),
-
-              // ── Live transcript display ──
-              Expanded(
-                child: Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: colors.surfaceContainerHighest.withOpacity(0.4),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                      color: _isListening
-                          ? colors.primary.withOpacity(0.4)
-                          : colors.outline.withOpacity(0.2),
-                      width: _isListening ? 1.5 : 1,
-                    ),
-                  ),
-                  child: SingleChildScrollView(
-                    reverse: true, // Auto-scroll to bottom as text grows
-                    child: _liveTranscript.isEmpty
-                        ? Text(
-                            _isListening
-                                ? 'Waiting for speech...'
-                                : 'Your transcript will appear here while you speak.',
-                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                              color: colors.onSurfaceVariant.withOpacity(0.5),
-                              fontStyle: FontStyle.italic,
-                            ),
-                          )
-                        : Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Icon(
-                                Icons.format_quote_rounded,
-                                size: 18,
-                                color: colors.primary.withOpacity(0.5),
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  _liveTranscript,
-                                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                                    height: 1.5,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
+              if (_isListening) ...[
+                const SizedBox(height: 16),
+                Text(
+                  _formatDuration(_recordingDuration),
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    color: colors.error,
+                    fontFeatures: const [FontFeature.tabularFigures()],
                   ),
                 ),
-              ),
-              const SizedBox(height: 16),
-
+              ],
+              const Spacer(),
               FilledButton(
                 key: const Key('voiceToggleButton'),
-                onPressed: _isProcessing ? null : _toggleListening,
+                onPressed: _toggleListening,
                 style: FilledButton.styleFrom(
                   backgroundColor: _isListening ? colors.error : colors.primary,
                   minimumSize: const Size.fromHeight(72),
@@ -634,35 +524,17 @@ class _NewBillScreenState extends State<NewBillScreen> {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    if (_isProcessing)
-                      const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
-                        ),
-                      )
-                    else
-                      Icon(_isListening ? Icons.stop_rounded : Icons.mic_rounded),
+                    Icon(_isListening ? Icons.stop_rounded : Icons.mic_rounded),
                     const SizedBox(width: 12),
-                    Text(_isProcessing
-                        ? 'Processing...'
-                        : _isListening
-                            ? 'Stop recording'
-                            : 'Start recording'),
+                    Text(_isListening ? 'Stop recording' : 'Start recording'),
                   ],
                 ),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 16),
               Text(
-                _isListening
-                    ? 'Live transcript appears above as you speak.'
-                    : 'You can review and correct the bill after recording.',
+                'You can review and correct the bill after recording.',
                 textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: colors.onSurfaceVariant,
-                ),
+                style: Theme.of(context).textTheme.bodyMedium,
               ),
             ],
           ),
@@ -673,28 +545,99 @@ class _NewBillScreenState extends State<NewBillScreen> {
 }
 
 class ProcessingBillScreen extends StatefulWidget {
-  const ProcessingBillScreen({required this.audioPath, required this.language, super.key});
+  const ProcessingBillScreen({
+    required this.audioPath,
+    required this.language,
+    this.recordingDuration,
+    super.key,
+  });
 
   final String audioPath;
   final VoiceLanguage language;
+  final Duration? recordingDuration;
 
   @override
   State<ProcessingBillScreen> createState() => _ProcessingBillScreenState();
 }
 
 class _ProcessingBillScreenState extends State<ProcessingBillScreen> {
+  int _progressPercent = 0;
+  String _stepLabel = 'Loading model...';
+  DateTime? _inferenceStart;
+  String _estimatedTimeLeft = '';
+
+  // Rough model speed factors (seconds of processing per second of audio)
+  // These are conservative estimates for mid-range Android devices.
+  static const _speedFactors = <WhisperModel, double>{
+    WhisperModel.base: 0.8,  // base processes ~1s audio in ~0.8s
+    WhisperModel.small: 2.5, // small is ~3× slower
+  };
+
   @override
   void initState() {
     super.initState();
     _openDraftBill();
   }
 
+  void _onProgress(int percent) {
+    if (!mounted) return;
+    setState(() {
+      _progressPercent = percent;
+      if (percent < 10) {
+        _stepLabel = 'Loading model...';
+      } else if (percent < 90) {
+        _stepLabel = 'Transcribing audio...';
+      } else {
+        _stepLabel = 'Matching products...';
+      }
+
+      // Estimate time remaining
+      if (_inferenceStart != null && percent > 5 && percent < 100) {
+        final elapsed = DateTime.now().difference(_inferenceStart!);
+        final totalEstimate = elapsed * (100 / percent);
+        final remaining = totalEstimate - elapsed;
+        final secs = remaining.inSeconds.clamp(1, 999);
+        _estimatedTimeLeft = '~${secs}s remaining';
+      } else if (percent >= 100) {
+        _estimatedTimeLeft = 'Almost done...';
+      }
+    });
+  }
+
+  String _formatDuration(Duration d) {
+    if (d.inMinutes > 0) {
+      return '${d.inMinutes}m ${d.inSeconds.remainder(60)}s';
+    }
+    return '${d.inSeconds}s';
+  }
+
   Future<void> _openDraftBill() async {
     if (!mounted) return;
+
+    // Show initial estimate based on recording duration and model
+    final model = widget.language == VoiceLanguage.malayalam
+        ? WhisperModel.small
+        : WhisperModel.base;
+    if (widget.recordingDuration != null) {
+      final factor = _speedFactors[model] ?? 1.5;
+      final estimatedSeconds = (widget.recordingDuration!.inSeconds * factor).ceil();
+      if (mounted) {
+        setState(() {
+          _estimatedTimeLeft = '~${estimatedSeconds}s estimated';
+        });
+      }
+    }
+
+    _inferenceStart = DateTime.now();
+
     try {
-      // Load products from DB instead of hardcoded catalog
       final dbProducts = await DatabaseHelper.instance.getAllProducts();
-      final draft = await VoiceBillDecoder.decode(widget.audioPath, dbProducts, language: widget.language);
+      final draft = await VoiceBillDecoder.decode(
+        widget.audioPath,
+        dbProducts,
+        language: widget.language,
+        onProgress: _onProgress,
+      );
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
         MaterialPageRoute<void>(builder: (_) => DraftBillScreen(draft: draft)),
@@ -714,17 +657,108 @@ class _ProcessingBillScreenState extends State<ProcessingBillScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(
+    final colors = Theme.of(context).colorScheme;
+    final progress = _progressPercent / 100.0;
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Processing')),
       body: SafeArea(
-        child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
           child: Column(
-            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              CircularProgressIndicator(),
-              SizedBox(height: 24),
-              Text('Generating your bill...'),
-              SizedBox(height: 8),
-              Text('Checking items, quantities, and prices.'),
+              const Spacer(),
+              // ── Progress ring ──
+              SizedBox(
+                width: 120,
+                height: 120,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    CircularProgressIndicator(
+                      value: _progressPercent > 0 ? progress : null,
+                      strokeWidth: 6,
+                      backgroundColor: colors.surfaceContainerHighest,
+                      color: colors.primary,
+                    ),
+                    Text(
+                      _progressPercent > 0 ? '$_progressPercent%' : '...',
+                      style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                        color: colors.primary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 32),
+
+              // ── Step label ──
+              Text(
+                _stepLabel,
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 8),
+
+              // ── ETA ──
+              if (_estimatedTimeLeft.isNotEmpty)
+                Text(
+                  _estimatedTimeLeft,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: colors.onSurfaceVariant,
+                  ),
+                ),
+
+              const SizedBox(height: 24),
+
+              // ── Recording info ──
+              if (widget.recordingDuration != null)
+                Card(
+                  elevation: 0,
+                  color: colors.surfaceContainerHighest,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.mic_rounded, size: 18, color: colors.onSurfaceVariant),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Audio: ${_formatDuration(widget.recordingDuration!)}',
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: colors.onSurfaceVariant,
+                          ),
+                        ),
+                        const SizedBox(width: 16),
+                        Icon(Icons.language_rounded, size: 18, color: colors.onSurfaceVariant),
+                        const SizedBox(width: 8),
+                        Text(
+                          widget.language.displayName,
+                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: colors.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              const Spacer(),
+
+              // ── Linear progress bar ──
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: LinearProgressIndicator(
+                  value: _progressPercent > 0 ? progress : null,
+                  minHeight: 6,
+                  backgroundColor: colors.surfaceContainerHighest,
+                  color: colors.primary,
+                ),
+              ),
+              const SizedBox(height: 16),
             ],
           ),
         ),
